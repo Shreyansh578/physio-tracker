@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+*.egg-info/
+dist/
+build/
+
+# MediaPipe model (large binary)
+backend/models/*.task
+
+# SQLite database
+backend/data/*.db
+
+# Node
+node_modules/
+frontend/dist/
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
