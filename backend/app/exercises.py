@@ -53,11 +53,14 @@ class Exercise(ABC):
 
 
 class BicepCurl(Exercise):
-    """Bicep curl exercise tracker tracking elbow flexion and upper-arm stability."""
+    """Bicep curl exercise tracker tracking elbow flexion on both arms and upper-arm stability."""
 
     def __init__(self) -> None:
         self.rep_count: int = 0
         self.state: str = "START"
+        self._left_state: str = "START"
+        self._right_state: str = "START"
+        self._last_rep_time: float = 0.0
         self._feedback: List[str] = []
         self._last_form_score: float = 1.0
 
@@ -69,36 +72,40 @@ class BicepCurl(Exercise):
         """Reset counter and state to initial values."""
         self.rep_count = 0
         self.state = "START"
+        self._left_state = "START"
+        self._right_state = "START"
+        self._last_rep_time = 0.0
         self._feedback = []
         self._last_form_score = 1.0
 
     def process(self, landmarks: Any) -> Dict[str, Any]:
-        """Analyze bicep curl form and repetition progression.
+        """Analyze bicep curl form and repetition progression for both arms.
 
         Landmark indices:
             Left arm: 11 (shoulder), 13 (elbow), 15 (wrist), 23 (hip)
             Right arm: 12 (shoulder), 14 (elbow), 16 (wrist), 24 (hip)
 
         States:
-            - DOWN: elbow angle > 160°
-            - UP: elbow angle < 40°
-            - Rep count increments on UP -> DOWN transition.
-
-        Form checks:
-            - Shoulder-elbow-hip angle: elbow flaring out > 25° from torso.
+            - DOWN: elbow angle > 145° (relaxed arm)
+            - UP: elbow angle < 60° (curled arm)
+            - Rep count increments when an arm returns from UP -> DOWN.
         """
-        if landmarks is None or len(landmarks) < 25:
+        import time
+        now = time.time()
+
+        if landmarks is None or len(landmarks) < 17:
             return {
                 "rep_count": self.rep_count,
                 "state": self.state,
                 "feedback": ["Subject not fully visible"],
                 "form_score": self._last_form_score,
+                "angle": 180.0,
             }
 
         feedback: List[str] = []
         form_score: float = 1.0
 
-        # Evaluate visibility of left vs right arm landmarks
+        # Calculate angles for both arms
         left_vis = (
             _get_visibility(landmarks[11])
             + _get_visibility(landmarks[13])
@@ -110,34 +117,61 @@ class BicepCurl(Exercise):
             + _get_visibility(landmarks[16])
         ) / 3.0
 
-        if right_vis > left_vis:
-            shoulder_idx, elbow_idx, wrist_idx, hip_idx = 12, 14, 16, 24
-        else:
-            shoulder_idx, elbow_idx, wrist_idx, hip_idx = 11, 13, 15, 23
+        left_angle = get_joint_angle(landmarks, 11, 13, 15) if left_vis > 0.3 else 180.0
+        right_angle = get_joint_angle(landmarks, 12, 14, 16) if right_vis > 0.3 else 180.0
 
-        # Primary elbow flexion angle
-        elbow_angle = get_joint_angle(landmarks, shoulder_idx, elbow_idx, wrist_idx)
+        # Determine active arm (the one with smaller elbow angle = more flexed)
+        active_angle = min(left_angle, right_angle) if (left_vis > 0.3 or right_vis > 0.3) else 180.0
 
-        # Form check: Elbow drift / flare away from the torso
-        # Measured as the angle at the shoulder between the elbow and hip
-        arm_body_angle = calculate_angle(
-            _extract_xy(landmarks[elbow_idx]),
-            _extract_xy(landmarks[shoulder_idx]),
-            _extract_xy(landmarks[hip_idx]),
-        )
-        if arm_body_angle > 25.0:
-            feedback.append("Keep your elbow closer to your body")
-            penalty = min(0.4, (arm_body_angle - 25.0) / 40.0 * 0.4 + 0.1)
-            form_score -= penalty
+        rep_added = False
 
-        # State machine and rep counting
-        if elbow_angle > 160.0:
-            if self.state == "UP":
-                self.rep_count += 1
-            self.state = "DOWN"
-        elif elbow_angle < 40.0:
+        # Track left arm rep
+        if left_vis > 0.3:
+            if left_angle < 60.0:
+                self._left_state = "UP"
+            elif left_angle > 145.0:
+                if self._left_state == "UP" and (now - self._last_rep_time > 0.4):
+                    self.rep_count += 1
+                    self._last_rep_time = now
+                    rep_added = True
+                self._left_state = "DOWN"
+
+        # Track right arm rep
+        if right_vis > 0.3:
+            if right_angle < 60.0:
+                self._right_state = "UP"
+            elif right_angle > 145.0:
+                if self._right_state == "UP" and (now - self._last_rep_time > 0.4) and not rep_added:
+                    self.rep_count += 1
+                    self._last_rep_time = now
+                self._right_state = "DOWN"
+
+        # Overall state for HUD
+        if self._left_state == "UP" or self._right_state == "UP" or active_angle < 60.0:
             self.state = "UP"
-        # In-between angles (40° - 160°) maintain current state with no penalty
+        elif active_angle < 120.0:
+            self.state = "CURLING"
+        else:
+            self.state = "DOWN"
+
+        # Form check: Elbow drift / flare away from the torso (only if hip landmark is visible)
+        tracked_shoulder = 12 if right_angle < left_angle else 11
+        tracked_elbow = 14 if right_angle < left_angle else 13
+        tracked_hip = 24 if right_angle < left_angle else 23
+
+        if len(landmarks) > tracked_hip and _get_visibility(landmarks[tracked_hip]) > 0.4:
+            arm_body_angle = calculate_angle(
+                _extract_xy(landmarks[tracked_elbow]),
+                _extract_xy(landmarks[tracked_shoulder]),
+                _extract_xy(landmarks[tracked_hip]),
+            )
+            if arm_body_angle > 30.0:
+                feedback.append("Keep your elbow closer to your body")
+                penalty = min(0.3, (arm_body_angle - 30.0) / 40.0 * 0.3 + 0.1)
+                form_score -= penalty
+
+        if not feedback:
+            feedback.append("Good form! Full range of motion.")
 
         form_score = max(0.0, min(1.0, round(form_score, 2)))
         self._last_form_score = form_score
@@ -148,6 +182,7 @@ class BicepCurl(Exercise):
             "state": self.state,
             "feedback": feedback,
             "form_score": form_score,
+            "angle": round(active_angle, 1),
         }
 
 
@@ -157,6 +192,7 @@ class Squat(Exercise):
     def __init__(self) -> None:
         self.rep_count: int = 0
         self.state: str = "START"
+        self._last_rep_time: float = 0.0
         self._feedback: List[str] = []
         self._last_form_score: float = 1.0
 
@@ -168,6 +204,7 @@ class Squat(Exercise):
         """Reset counter and state to initial values."""
         self.rep_count = 0
         self.state = "START"
+        self._last_rep_time = 0.0
         self._feedback = []
         self._last_form_score = 1.0
 
@@ -175,30 +212,29 @@ class Squat(Exercise):
         """Analyze squat form and repetition progression.
 
         Landmark indices:
-            Left leg: 11 (shoulder), 23 (hip), 25 (knee), 27 (ankle)
-            Right leg: 12 (shoulder), 24 (hip), 26 (knee), 28 (ankle)
+            Left leg: 23 (hip), 25 (knee), 27 (ankle)
+            Right leg: 24 (hip), 26 (knee), 28 (ankle)
 
         States:
-            - DOWN: knee angle < 100°
-            - UP: knee angle > 160°
+            - DOWN: knee angle < 115°
+            - UP: knee angle > 150°
             - Rep count increments on DOWN -> UP transition.
-
-        Form checks:
-            - Back angle: shoulder-hip-knee angle < 45°
-            - Knee over toes: knee extends significantly past ankle in facing direction
         """
+        import time
+        now = time.time()
+
         if landmarks is None or len(landmarks) < 29:
             return {
                 "rep_count": self.rep_count,
                 "state": self.state,
                 "feedback": ["Subject not fully visible"],
                 "form_score": self._last_form_score,
+                "angle": 180.0,
             }
 
         feedback: List[str] = []
         form_score: float = 1.0
 
-        # Evaluate visibility of left vs right leg landmarks
         left_vis = (
             _get_visibility(landmarks[23])
             + _get_visibility(landmarks[25])
@@ -210,41 +246,51 @@ class Squat(Exercise):
             + _get_visibility(landmarks[28])
         ) / 3.0
 
-        if right_vis > left_vis:
+        left_knee_angle = get_joint_angle(landmarks, 23, 25, 27) if left_vis > 0.3 else 180.0
+        right_knee_angle = get_joint_angle(landmarks, 24, 26, 28) if right_vis > 0.3 else 180.0
+
+        if left_vis > 0.3 and right_vis > 0.3:
+            knee_angle = min(left_knee_angle, right_knee_angle)
+            shoulder_idx = 12 if right_vis >= left_vis else 11
+            hip_idx = 24 if right_vis >= left_vis else 23
+            knee_idx = 26 if right_vis >= left_vis else 25
+            ankle_idx = 28 if right_vis >= left_vis else 27
+        elif right_vis > 0.3:
+            knee_angle = right_knee_angle
             shoulder_idx, hip_idx, knee_idx, ankle_idx = 12, 24, 26, 28
         else:
+            knee_angle = left_knee_angle
             shoulder_idx, hip_idx, knee_idx, ankle_idx = 11, 23, 25, 27
 
-        # Knee angle
-        knee_angle = get_joint_angle(landmarks, hip_idx, knee_idx, ankle_idx)
-
-        # Form check 1: Back angle (shoulder - hip - knee angle at hip)
+        # Form check 1: Back angle
         back_angle = get_joint_angle(landmarks, shoulder_idx, hip_idx, knee_idx)
         if back_angle < 45.0:
             feedback.append("Keep your back straighter")
             form_score -= 0.3
 
-        # Form check 2: Knee over toes (compare knee x to ankle x in facing direction)
+        # Form check 2: Knee over toes
         knee_x = _extract_xy(landmarks[knee_idx])[0]
         ankle_x = _extract_xy(landmarks[ankle_idx])[0]
         hip_x = _extract_xy(landmarks[hip_idx])[0]
 
-        # Determine horizontal facing direction based on knee relative to hip
         is_facing_right = knee_x >= hip_x
         knee_extension = (knee_x - ankle_x) if is_facing_right else (ankle_x - knee_x)
 
-        # Flag excessive forward knee travel when knees are significantly past ankles (> 0.06 normalized)
-        if knee_extension > 0.06 and knee_angle < 140.0:
+        if knee_extension > 0.08 and knee_angle < 130.0:
             feedback.append("Don't let your knees go past your toes")
             form_score -= 0.3
 
         # State machine and rep counting: Rep counts on transition from DOWN -> UP
-        if knee_angle < 100.0:
+        if knee_angle < 115.0:
             self.state = "DOWN"
-        elif knee_angle > 160.0:
-            if self.state == "DOWN":
+        elif knee_angle > 150.0:
+            if self.state == "DOWN" and (now - self._last_rep_time > 0.5):
                 self.rep_count += 1
+                self._last_rep_time = now
             self.state = "UP"
+
+        if not feedback:
+            feedback.append("Good squat form!")
 
         form_score = max(0.0, min(1.0, round(form_score, 2)))
         self._last_form_score = form_score
@@ -255,6 +301,7 @@ class Squat(Exercise):
             "state": self.state,
             "feedback": feedback,
             "form_score": form_score,
+            "angle": round(knee_angle, 1),
         }
 
 

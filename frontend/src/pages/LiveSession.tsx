@@ -15,13 +15,14 @@ export const LiveSession: React.FC = () => {
   const [repCount, setRepCount] = useState<number>(0);
   const [feedback, setFeedback] = useState<string[]>([]);
   const [formStatus, setFormStatus] = useState<'good' | 'warning' | 'error'>('good');
-  const [, setExerciseState] = useState<string>('');
+  const [exerciseState, setExerciseState] = useState<string>('');
+  const [motionAngle, setMotionAngle] = useState<number>(0);
   const [annotatedFrame, setAnnotatedFrame] = useState<string | null>(null);
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
 
   // Custom hooks
-  const { videoRef, canvasRef, isActive, startCamera, stopCamera, captureFrame } = useCamera();
+  const { videoRef, canvasRef, isActive, cameraError, startCamera, stopCamera, captureFrame } = useCamera();
   const { connect, disconnect, send, lastMessage, isConnected } = useWebSocket();
 
   // On mount: start camera, connect websocket, activate session
@@ -32,10 +33,11 @@ export const LiveSession: React.FC = () => {
       try {
         await startCamera();
         if (mounted) {
+          const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
           const wsUrl =
             window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-              ? 'ws://localhost:8000/ws/video'
-              : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/video`;
+              ? `${protocol}//${window.location.hostname}:8000/ws/video`
+              : `${protocol}//${window.location.host}/ws/video`;
 
           connect(wsUrl);
           setIsSessionActive(true);
@@ -98,6 +100,9 @@ export const LiveSession: React.FC = () => {
     if (data.state) {
       setExerciseState(data.state);
     }
+    if (typeof data.angle === 'number') {
+      setMotionAngle(data.angle);
+    }
     if (Array.isArray(data.feedback)) {
       setFeedback(data.feedback);
     }
@@ -150,24 +155,25 @@ export const LiveSession: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
-      {/* Hidden elements for capturing video feed */}
-      <video
-        ref={videoRef}
-        className="hidden"
-        playsInline
-        muted
-        autoPlay
-      />
+      {/* Offscreen canvas for JPEG frame capture */}
       <canvas ref={canvasRef} className="hidden" />
 
       {/* Main Video & HUD Container */}
       <div className="relative w-full max-w-4xl mx-auto">
-        <VideoFeed frame={annotatedFrame} isConnected={isConnected} />
+        <VideoFeed
+          videoRef={videoRef}
+          frame={annotatedFrame}
+          isConnected={isConnected}
+          isActive={isActive}
+          cameraError={cameraError}
+        />
         <HUD
           repCount={repCount}
           exercise={exercise}
           formStatus={formStatus}
           feedback={feedback}
+          state={exerciseState}
+          angle={motionAngle}
         />
       </div>
 

@@ -5,6 +5,8 @@ export interface HUDProps {
   exercise: string;
   formStatus: 'good' | 'warning' | 'error';
   feedback: string[];
+  state?: string;
+  angle?: number;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -12,6 +14,8 @@ export const HUD: React.FC<HUDProps> = ({
   exercise,
   formStatus,
   feedback,
+  state,
+  angle,
 }) => {
   const formatExerciseName = (name: string) => {
     if (!name) return 'EXERCISE';
@@ -76,8 +80,21 @@ export const HUD: React.FC<HUDProps> = ({
         <div>{getStatusBadge()}</div>
       </div>
 
-      {/* Bottom-center: Rep counter */}
-      <div className="flex justify-center mb-2">
+      {/* Bottom-center: Rep counter and live angle/state */}
+      <div className="flex flex-col items-center justify-center mb-2 gap-2">
+        {state && (
+          <div className="bg-slate-900/90 backdrop-blur-md px-4 py-1.5 rounded-full border border-slate-700/60 shadow-lg flex items-center gap-3">
+            <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
+              {state === 'UP' ? '⬆️ UP' : state === 'DOWN' ? '⬇️ DOWN' : state === 'CURLING' ? '⚡ CURLING' : state}
+            </span>
+            {angle !== undefined && angle > 0 && (
+              <span className="text-xs font-mono font-semibold text-slate-300 border-l border-slate-700 pl-3">
+                {Math.round(angle)}°
+              </span>
+            )}
+          </div>
+        )}
+
         <div className="bg-slate-900/85 backdrop-blur-md px-8 py-3.5 rounded-2xl border border-slate-700/60 shadow-2xl flex flex-col items-center min-w-36">
           <span className="text-5xl font-black text-white tracking-tight leading-none drop-shadow-md">
             {repCount}

@@ -154,6 +154,7 @@ class VideoWebSocketHandler:
                     state = result["state"]
                     feedback = result["feedback"]
                     form_score = result["form_score"]
+                    angle = result.get("angle", 0.0)
 
                     self.form_scores.append(form_score)
                     for item in feedback:
@@ -162,8 +163,9 @@ class VideoWebSocketHandler:
                 else:
                     rep_count = self.exercise.rep_count if self.exercise else 0
                     state = self.exercise.state if self.exercise else "NO_POSE"
-                    feedback = ["No person detected"]
+                    feedback = ["No person detected. Step into camera view."]
                     form_score = 0.0
+                    angle = 0.0
 
                 # 5. Draw landmarks on frame
                 annotated_frame = self.pose_detector.draw_landmarks(frame, detection_result)
@@ -181,6 +183,8 @@ class VideoWebSocketHandler:
                     "state": state,
                     "feedback": feedback,
                     "form_score": form_score,
+                    "angle": angle,
+                    "session_id": self.session_id,
                     "frame": encoded_frame_b64,
                 })
 
