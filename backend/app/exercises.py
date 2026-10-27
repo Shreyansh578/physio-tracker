@@ -127,9 +127,9 @@ class BicepCurl(Exercise):
 
         # Track left arm rep
         if left_vis > 0.3:
-            if left_angle < 60.0:
+            if left_angle < 70.0:
                 self._left_state = "UP"
-            elif left_angle > 145.0:
+            elif left_angle > 135.0:
                 if self._left_state == "UP" and (now - self._last_rep_time > 0.4):
                     self.rep_count += 1
                     self._last_rep_time = now
@@ -138,18 +138,18 @@ class BicepCurl(Exercise):
 
         # Track right arm rep
         if right_vis > 0.3:
-            if right_angle < 60.0:
+            if right_angle < 70.0:
                 self._right_state = "UP"
-            elif right_angle > 145.0:
+            elif right_angle > 135.0:
                 if self._right_state == "UP" and (now - self._last_rep_time > 0.4) and not rep_added:
                     self.rep_count += 1
                     self._last_rep_time = now
                 self._right_state = "DOWN"
 
         # Overall state for HUD
-        if self._left_state == "UP" or self._right_state == "UP" or active_angle < 60.0:
+        if self._left_state == "UP" or self._right_state == "UP" or active_angle < 70.0:
             self.state = "UP"
-        elif active_angle < 120.0:
+        elif active_angle < 115.0:
             self.state = "CURLING"
         else:
             self.state = "DOWN"
@@ -281,9 +281,9 @@ class Squat(Exercise):
             form_score -= 0.3
 
         # State machine and rep counting: Rep counts on transition from DOWN -> UP
-        if knee_angle < 115.0:
+        if knee_angle < 120.0:
             self.state = "DOWN"
-        elif knee_angle > 150.0:
+        elif knee_angle > 145.0:
             if self.state == "DOWN" and (now - self._last_rep_time > 0.5):
                 self.rep_count += 1
                 self._last_rep_time = now

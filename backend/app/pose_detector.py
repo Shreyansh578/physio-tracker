@@ -181,6 +181,15 @@ class PoseDetector:
         annotated = frame.copy()
         height, width = frame.shape[:2]
 
+        def _get_coords(lm: Any) -> Tuple[float, float]:
+            if hasattr(lm, "x") and hasattr(lm, "y"):
+                return float(lm.x), float(lm.y)
+            if isinstance(lm, dict):
+                return float(lm.get("x", 0.0)), float(lm.get("y", 0.0))
+            if isinstance(lm, (list, tuple)) and len(lm) >= 2:
+                return float(lm[0]), float(lm[1])
+            return 0.0, 0.0
+
         for landmarks in pose_landmarks_list:
             # 1. Draw skeleton connection lines (Cyan: BGR (255, 255, 0))
             for start_idx, end_idx in POSE_CONNECTIONS:
@@ -191,18 +200,18 @@ class PoseDetector:
                     vis1 = getattr(lm1, "visibility", 1.0)
                     vis2 = getattr(lm2, "visibility", 1.0)
                     if (vis1 is None or vis1 > 0.3) and (vis2 is None or vis2 > 0.3):
-                        x1 = int(getattr(lm1, "x", lm1[0]) * width)
-                        y1 = int(getattr(lm1, "y", lm1[1]) * height)
-                        x2 = int(getattr(lm2, "x", lm2[0]) * width)
-                        y2 = int(getattr(lm2, "y", lm2[1]) * height)
+                        x1_n, y1_n = _get_coords(lm1)
+                        x2_n, y2_n = _get_coords(lm2)
+                        x1, y1 = int(x1_n * width), int(y1_n * height)
+                        x2, y2 = int(x2_n * width), int(y2_n * height)
                         cv2.line(annotated, (x1, y1), (x2, y2), (255, 255, 0), thickness=2)
 
             # 2. Draw joint landmark circles (Magenta: BGR (255, 0, 255))
             for lm in landmarks:
                 vis = getattr(lm, "visibility", 1.0)
                 if vis is None or vis > 0.3:
-                    x = int(getattr(lm, "x", lm[0]) * width)
-                    y = int(getattr(lm, "y", lm[1]) * height)
+                    x_n, y_n = _get_coords(lm)
+                    x, y = int(x_n * width), int(y_n * height)
                     cv2.circle(annotated, (x, y), radius=4, color=(255, 0, 255), thickness=-1)
 
         return annotated
