@@ -65,7 +65,7 @@ export function useCamera(): UseCameraReturn {
       const msg = err?.name === 'NotAllowedError'
         ? 'Camera access was denied. Please allow camera permissions in your browser address bar.'
         : err?.name === 'NotFoundError'
-        ? 'No camera found. Please connect a webcam.'
+        ? 'No camera found. Please ensure your webcam is connected or enabled in macOS System Settings > Privacy & Security > Camera.'
         : 'Failed to access camera: ' + (err?.message || 'Unknown error');
       setCameraError(msg);
       setIsActive(false);

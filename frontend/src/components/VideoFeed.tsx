@@ -6,6 +6,7 @@ export interface VideoFeedProps {
   isConnected: boolean;
   isActive: boolean;
   cameraError: string | null;
+  onRetryCamera?: () => void;
 }
 
 export const VideoFeed: React.FC<VideoFeedProps> = ({
@@ -14,6 +15,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
   isConnected,
   isActive,
   cameraError,
+  onRetryCamera,
 }) => {
   const imageSrc = frame
     ? frame.startsWith('data:')
@@ -76,6 +78,14 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({
           <p className="text-xs text-slate-400 mt-2">
             Click the camera icon in your browser address bar to allow permissions, then reload.
           </p>
+          {onRetryCamera && (
+            <button
+              onClick={onRetryCamera}
+              className="mt-4 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-lg shadow-rose-600/30 transition cursor-pointer"
+            >
+              🔄 Retry Camera Access
+            </button>
+          )}
         </div>
       )}
 

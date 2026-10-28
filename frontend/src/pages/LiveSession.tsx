@@ -166,6 +166,7 @@ export const LiveSession: React.FC = () => {
           isConnected={isConnected}
           isActive={isActive}
           cameraError={cameraError}
+          onRetryCamera={startCamera}
         />
         <HUD
           repCount={repCount}
