@@ -1,4 +1,4 @@
-"""Asynchronous SQLite database operations for session history using aiosqlite."""
+"""Asynchronous SQLite database operations for user profiles and workout session history."""
 
 from datetime import datetime, timezone
 import json
@@ -15,7 +15,7 @@ DB_PATH = BACKEND_DIR / "data" / "physio.db"
 
 
 async def init_db(db_path: Optional[Path] = None) -> None:
-    """Initialize the SQLite database, create directories and schema if not exist.
+    """Initialize the SQLite database, create directories, users table, and session schema.
 
     Args:
         db_path: Optional custom path to SQLite database. Defaults to data/physio.db.
@@ -24,10 +24,25 @@ async def init_db(db_path: Optional[Path] = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     async with aiosqlite.connect(str(path)) as db:
+        # 1. Users table for Google OAuth profiles
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                picture TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+        # 2. Sessions table
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
                 started_at TEXT NOT NULL,
                 ended_at TEXT,
                 exercise_type TEXT NOT NULL,
@@ -37,15 +52,83 @@ async def init_db(db_path: Optional[Path] = None) -> None:
             )
             """
         )
+
+        # Check if user_id column exists in existing database; add if missing
+        cursor = await db.execute("PRAGMA table_info(sessions)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "user_id" not in columns:
+            await db.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
+            logger.info("Migrated sessions table with user_id column")
+
         await db.commit()
     logger.info(f"Database initialized at {path}")
 
 
-async def create_session(exercise_type: str, db_path: Optional[Path] = None) -> int:
-    """Create a new workout session record.
+async def upsert_user(
+    user_id: str,
+    email: str,
+    name: str,
+    picture: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Insert or update a user profile from Google OAuth.
+
+    Args:
+        user_id: Unique Google user ID (e.g. google_12345).
+        email: User email address.
+        name: Full user display name.
+        picture: Avatar URL.
+        db_path: Optional path to SQLite database.
+
+    Returns:
+        dict: User profile record.
+    """
+    path = db_path or DB_PATH
+    now = datetime.now(timezone.utc).isoformat()
+
+    async with aiosqlite.connect(str(path)) as db:
+        db.row_factory = aiosqlite.Row
+        await db.execute(
+            """
+            INSERT INTO users (id, email, name, picture, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                email = excluded.email,
+                name = excluded.name,
+                picture = excluded.picture
+            """,
+            (user_id, email, name, picture or "", now),
+        )
+        await db.commit()
+
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+        assert row is not None
+        return dict(row)
+
+
+async def get_user_by_id(user_id: str, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
+    """Look up a user profile by user ID."""
+    path = db_path or DB_PATH
+    async with aiosqlite.connect(str(path)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+
+async def create_session(
+    exercise_type: str,
+    user_id: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> int:
+    """Create a new workout session record linked to a user.
 
     Args:
         exercise_type: Name/type of the exercise being recorded.
+        user_id: Optional authenticated user ID.
         db_path: Optional custom path to SQLite database.
 
     Returns:
@@ -57,10 +140,10 @@ async def create_session(exercise_type: str, db_path: Optional[Path] = None) -> 
     async with aiosqlite.connect(str(path)) as db:
         cursor = await db.execute(
             """
-            INSERT INTO sessions (started_at, exercise_type, total_reps, avg_form_score, feedback_log)
-            VALUES (?, ?, 0, 0.0, '[]')
+            INSERT INTO sessions (user_id, started_at, exercise_type, total_reps, avg_form_score, feedback_log)
+            VALUES (?, ?, ?, 0, 0.0, '[]')
             """,
-            (started_at, exercise_type),
+            (user_id, started_at, exercise_type),
         )
         await db.commit()
         session_id = cursor.lastrowid
@@ -75,15 +158,7 @@ async def update_session(
     feedback_log: List[Any],
     db_path: Optional[Path] = None,
 ) -> None:
-    """Update an existing session with final rep counts, average score, and feedback logs.
-
-    Args:
-        session_id: The ID of the session to update.
-        total_reps: Total completed repetitions.
-        avg_form_score: Computed mean form score in range [0.0, 1.0].
-        feedback_log: List of feedback strings or events encountered during session.
-        db_path: Optional custom path to SQLite database.
-    """
+    """Update an existing session with final rep counts, average score, and feedback logs."""
     path = db_path or DB_PATH
     ended_at = datetime.now(timezone.utc).isoformat()
     feedback_json = json.dumps(feedback_log)
@@ -114,35 +189,32 @@ def _format_session_row(row: aiosqlite.Row) -> Dict[str, Any]:
     return item
 
 
-async def get_sessions(db_path: Optional[Path] = None) -> List[Dict[str, Any]]:
-    """Retrieve all recorded exercise sessions ordered by started_at descending.
+async def get_sessions(
+    user_id: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recorded exercise sessions ordered by started_at descending.
 
-    Args:
-        db_path: Optional custom path to SQLite database.
-
-    Returns:
-        list[dict]: List of session dictionaries.
+    If user_id is provided, returns sessions for that user or unassigned legacy sessions.
     """
     path = db_path or DB_PATH
     async with aiosqlite.connect(str(path)) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM sessions ORDER BY started_at DESC"
-        )
+        if user_id:
+            cursor = await db.execute(
+                "SELECT * FROM sessions WHERE user_id = ? OR user_id IS NULL ORDER BY started_at DESC LIMIT 50",
+                (user_id,),
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM sessions ORDER BY started_at DESC LIMIT 50"
+            )
         rows = await cursor.fetchall()
         return [_format_session_row(row) for row in rows]
 
 
 async def get_session(session_id: int, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """Retrieve a single session by its unique ID.
-
-    Args:
-        session_id: The session ID to look up.
-        db_path: Optional custom path to SQLite database.
-
-    Returns:
-        dict or None: The session record if found, else None.
-    """
+    """Retrieve a single session by its unique ID."""
     path = db_path or DB_PATH
     async with aiosqlite.connect(str(path)) as db:
         db.row_factory = aiosqlite.Row

@@ -68,10 +68,12 @@ export const LiveSession: React.FC = () => {
     const intervalId = setInterval(() => {
       const frame = captureFrame();
       if (frame) {
+        const token = localStorage.getItem('physiotrack_jwt');
         send(
           JSON.stringify({
             frame,
             exercise,
+            token,
           })
         );
       }
@@ -148,7 +150,10 @@ export const LiveSession: React.FC = () => {
     // If session ID was not sent in WS messages, retrieve newest session from API
     if (!targetSessionId) {
       try {
-        const res = await fetch('/api/sessions');
+        const token = localStorage.getItem('physiotrack_jwt');
+        const res = await fetch('/api/sessions', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (res.ok) {
           const sessions = await res.json();
           if (Array.isArray(sessions) && sessions.length > 0) {

@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
+from app.auth import decode_access_token
 from app.database import create_session, update_session
 from app.exercises import Exercise, get_exercise
 from app.pose_detector import PoseDetector
@@ -29,6 +30,7 @@ class VideoWebSocketHandler:
         self.pose_detector: PoseDetector = pose_detector or PoseDetector()
         self.exercise: Optional[Exercise] = None
         self.session_id: Optional[int] = None
+        self.user_id: Optional[str] = None
         self.last_timestamp_ms: int = 0
         self.form_scores: List[float] = []
         self.feedback_history: List[str] = []
@@ -71,8 +73,8 @@ class VideoWebSocketHandler:
         self.exercise = get_exercise(exercise_name)
         self.form_scores.clear()
         self.feedback_history.clear()
-        self.session_id = await create_session(self.exercise.name)
-        logger.info(f"Started new session {self.session_id} for exercise '{self.exercise.name}'")
+        self.session_id = await create_session(self.exercise.name, user_id=self.user_id)
+        logger.info(f"Started new session {self.session_id} for user {self.user_id} and exercise '{self.exercise.name}'")
 
     async def handle_connection(self, websocket: WebSocket) -> None:
         """Main WebSocket loop receiving video frames, running inference, and sending feedback.
@@ -96,6 +98,12 @@ class VideoWebSocketHandler:
 
                 frame_data: str = payload.get("frame", "")
                 exercise_name: str = payload.get("exercise", "bicep_curl")
+                user_token: Optional[str] = payload.get("token")
+
+                if user_token and not self.user_id:
+                    user_claims = decode_access_token(user_token)
+                    if user_claims:
+                        self.user_id = user_claims.get("sub")
 
                 # Handle exercise switching or initial exercise setup
                 if self.exercise is None or self.exercise.name != exercise_name:

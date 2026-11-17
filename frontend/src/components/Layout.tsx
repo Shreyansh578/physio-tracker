@@ -1,5 +1,6 @@
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -7,12 +8,19 @@ interface LayoutProps {
 
 export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   const getPageTitle = () => {
     if (location.pathname === '/') return 'Exercise Dashboard';
     if (location.pathname.startsWith('/session')) return 'Live Workout Session';
     if (location.pathname.startsWith('/summary')) return 'Session Summary';
     return 'PhysioTrack';
+  };
+
+  const handleSignOut = () => {
+    logout();
+    navigate('/login');
   };
 
   return (
@@ -90,9 +98,49 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           </NavLink>
         </nav>
 
-        {/* System Info footer */}
-        <div className="p-4 border-t border-slate-800 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
+        {/* User Profile & Sign Out Footer */}
+        <div className="p-4 border-t border-slate-800 bg-slate-900/80">
+          {user ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                {user.picture ? (
+                  <img
+                    src={user.picture}
+                    alt={user.name}
+                    className="w-9 h-9 rounded-full border border-emerald-500/30 object-cover"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-semibold text-xs">
+                    {user.name.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-white truncate">{user.name}</p>
+                  <p className="text-[11px] text-slate-400 truncate">{user.email}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 hover:text-rose-400 hover:bg-rose-500/10 border border-slate-800 hover:border-rose-500/30 transition-all"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                </svg>
+                <span>Sign Out</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-all"
+            >
+              <span>Sign In with Google</span>
+            </button>
+          )}
+
+          <div className="mt-3 pt-3 border-t border-slate-800/60 flex items-center gap-2 text-[11px] text-slate-400">
             <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
             <span>Vision Engine Active</span>
           </div>
@@ -106,7 +154,13 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
           <h1 className="text-lg font-semibold text-white tracking-wide">
             {getPageTitle()}
           </h1>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-4">
+            {user && (
+              <span className="text-xs text-slate-300 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700/80 flex items-center gap-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span>Signed in as <strong>{user.name}</strong></span>
+              </span>
+            )}
             <span className="text-xs bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-slate-700">
               WebCam • 10 FPS Realtime
             </span>

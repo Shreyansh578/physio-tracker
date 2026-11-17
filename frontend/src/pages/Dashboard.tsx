@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ExerciseCard } from '../components/ExerciseCard';
+import { useAuth } from '../context/AuthContext';
 
 interface SessionItem {
   id: number;
@@ -18,10 +19,14 @@ export const Dashboard: React.FC = () => {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const { token } = useAuth();
+
   useEffect(() => {
     const fetchSessions = async () => {
       try {
-        const res = await fetch('/api/sessions');
+        const res = await fetch('/api/sessions', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         if (res.ok) {
           const data = await res.json();
           setSessions(data);
@@ -34,7 +39,7 @@ export const Dashboard: React.FC = () => {
     };
 
     fetchSessions();
-  }, []);
+  }, [token]);
 
   const handleStartWorkout = () => {
     if (selectedExercise) {
