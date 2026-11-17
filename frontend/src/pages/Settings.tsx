@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage, SUPPORTED_LANGUAGES } from '../context/LanguageContext';
 import { soundEngine } from '../utils/audioAlerts';
 
 export const Settings: React.FC = () => {
   const { user } = useAuth();
+  const { language, setLanguage, t, getSpeechLocale } = useLanguage();
 
   const [buzzerActive, setBuzzerActive] = useState<boolean>(soundEngine.buzzerEnabled);
   const [voiceActive, setVoiceActive] = useState<boolean>(soundEngine.voiceEnabled);
@@ -27,13 +29,15 @@ export const Settings: React.FC = () => {
 
   const handleTestDangerBuzzer = () => {
     soundEngine.playBuzzer('danger');
-    soundEngine.speak('Stop! Critical form deviation detected.');
-    setTestStatus('Sounding: 180Hz Critical Stop Buzzer + Speech Voice');
+    const speech = t('speech_fault_elbow');
+    soundEngine.speak(speech, getSpeechLocale(), true);
+    setTestStatus(`Sounding: 180Hz Buzzer + Spoken Cue in ${language.toUpperCase()}`);
     setTimeout(() => setTestStatus(null), 2500);
   };
 
   const handleTestSuccessChime = () => {
     soundEngine.playSuccessChime();
+    soundEngine.speak(t('speech_rep_completed'), getSpeechLocale());
     setTestStatus('Sounding: Melodic Repetition Complete Chime');
     setTimeout(() => setTestStatus(null), 1500);
   };
@@ -44,11 +48,47 @@ export const Settings: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-white tracking-tight">
-            System Settings & Audio Calibrations
+            {t('title_settings')}
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Configure real-time auditory buzzer alarms, voice coaching frequency, and device controls
+            Configure real-time auditory buzzer alarms, voice coaching language, and device controls
           </p>
+        </div>
+      </div>
+
+      {/* Multi-Language Selection Card */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-md space-y-4">
+        <div className="flex items-center gap-3 pb-3 border-b border-slate-800">
+          <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-xl">
+            🌐
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-white">
+              Application Language & Speech Localization
+            </h3>
+            <p className="text-xs text-slate-400">
+              Changes the entire user interface and AI voice coaching to your preferred language
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {SUPPORTED_LANGUAGES.map((lang) => (
+            <button
+              key={lang.code}
+              type="button"
+              onClick={() => setLanguage(lang.code)}
+              className={`p-3.5 rounded-2xl border text-center transition-all ${
+                language === lang.code
+                  ? 'bg-emerald-500/15 border-emerald-500 text-white font-bold shadow-lg shadow-emerald-500/10'
+                  : 'bg-slate-950/70 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
+              }`}
+            >
+              <div className="text-2xl mb-1">{lang.flag}</div>
+              <div className="text-xs font-semibold">{lang.nativeLabel}</div>
+              <div className="text-[10px] text-slate-400">{lang.label}</div>
+            </button>
+          ))}
         </div>
       </div>
 
@@ -92,7 +132,7 @@ export const Settings: React.FC = () => {
             <div>
               <p className="text-xs font-semibold text-white">AI Spoken Voice Coaching</p>
               <p className="text-[11px] text-slate-400">
-                Speaks immediate verbal cues ("Stop! You are swinging your lower back", "Lock elbows")
+                Speaks immediate verbal cues in {SUPPORTED_LANGUAGES.find((l) => l.code === language)?.nativeLabel} ("{t('speech_fault_prefix')}")
               </p>
             </div>
             <label className="relative inline-flex items-center cursor-pointer">
@@ -125,7 +165,7 @@ export const Settings: React.FC = () => {
               onClick={handleTestDangerBuzzer}
               className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-rose-400 border border-rose-500/30 text-xs font-medium transition-all active:scale-[0.98]"
             >
-              🚨 Test Critical Stop Buzzer
+              🚨 Test Critical Stop Buzzer & Voice
             </button>
             <button
               type="button"

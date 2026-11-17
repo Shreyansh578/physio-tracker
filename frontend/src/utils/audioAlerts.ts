@@ -1,6 +1,6 @@
 /**
- * Web Audio API & Speech Synthesis utility for real-time auditory buzzer and voice coaching.
- * Uses browser-native synthesis: zero external audio assets, zero latency, guaranteed reliability.
+ * Web Audio API & Multi-Lingual Speech Synthesis utility.
+ * Delivers hardware-level synthesized buzzer alarms and localized verbal coaching.
  */
 
 class SoundEngine {
@@ -12,7 +12,6 @@ class SoundEngine {
   public voiceEnabled = true;
 
   constructor() {
-    // Load persisted preferences if available
     try {
       this.buzzerEnabled = localStorage.getItem('physio_buzzer_enabled') !== 'false';
       this.voiceEnabled = localStorage.getItem('physio_voice_enabled') !== 'false';
@@ -55,7 +54,7 @@ class SoundEngine {
       const gain = ctx.createGain();
 
       if (type === 'danger') {
-        // Harsh industrial low-frequency buzzer for critical posture stop (160Hz sawtooth)
+        // Harsh industrial low-frequency buzzer for critical posture stop (180Hz -> 130Hz sawtooth)
         osc.type = 'sawtooth';
         osc.frequency.setValueAtTime(180, ctx.currentTime);
         osc.frequency.exponentialRampToValueAtTime(130, ctx.currentTime + 0.35);
@@ -69,7 +68,7 @@ class SoundEngine {
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.35);
       } else {
-        // High alert beep for form warning (580Hz square wave)
+        // Alert beep for form warning (580Hz -> 440Hz square wave)
         osc.type = 'square';
         osc.frequency.setValueAtTime(580, ctx.currentTime);
         osc.frequency.setValueAtTime(440, ctx.currentTime + 0.12);
@@ -121,9 +120,9 @@ class SoundEngine {
   }
 
   /**
-   * Speak coaching instructions aloud using Web Speech API.
+   * Speak coaching instructions aloud using Web Speech API in the target user language.
    */
-  speak(text: string, force = false): void {
+  speak(text: string, locale = 'en-US', force = false): void {
     if (!this.voiceEnabled && !force) return;
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
@@ -137,12 +136,22 @@ class SoundEngine {
     this.lastSpokenText = text;
 
     try {
-      // Cancel pending utterance to deliver real-time instruction
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = locale;
       utterance.rate = 1.05;
       utterance.pitch = 1.0;
       utterance.volume = 0.95;
+
+      // Match voice for selected locale if available
+      const voices = window.speechSynthesis.getVoices();
+      const matchingVoice = voices.find(
+        (v) => v.lang === locale || v.lang.startsWith(locale.split('-')[0])
+      );
+      if (matchingVoice) {
+        utterance.voice = matchingVoice;
+      }
+
       window.speechSynthesis.speak(utterance);
     } catch (err) {
       console.warn('Speech synthesis error:', err);

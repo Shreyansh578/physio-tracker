@@ -4,11 +4,14 @@ import { useCamera } from '../hooks/useCamera';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { VideoFeed } from '../components/VideoFeed';
 import { HUD, type AICoachFeedback } from '../components/HUD';
+import { PostureCorrectionModal } from '../components/PostureCorrectionModal';
 import { soundEngine } from '../utils/audioAlerts';
+import { useLanguage } from '../context/LanguageContext';
 
 export const LiveSession: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { t, getSpeechLocale } = useLanguage();
 
   const exercise = searchParams.get('exercise') || 'bicep_curl';
 
@@ -26,6 +29,13 @@ export const LiveSession: React.FC = () => {
   const [sessionId, setSessionId] = useState<number | null>(null);
   const [aiCoach, setAiCoach] = useState<AICoachFeedback | undefined>(undefined);
   const [buzzerEnabled, setBuzzerEnabled] = useState<boolean>(soundEngine.buzzerEnabled);
+
+  // Correction Video Modal state
+  const [showCorrectionModal, setShowCorrectionModal] = useState<boolean>(false);
+  const [faultArea, setFaultArea] = useState<string>('');
+  const [faultDesc, setFaultDesc] = useState<string>('');
+  const consecutiveFaultsRef = useRef<number>(0);
+  const lastSpokenFaultTimeRef = useRef<number>(0);
 
   // Track previous rep count to play success chime
   const prevRepCountRef = useRef<number>(0);
@@ -74,9 +84,9 @@ export const LiveSession: React.FC = () => {
     };
   }, [startCamera, stopCamera, connect, disconnect]);
 
-  // Frame capture loop: 100ms = 10 FPS
+  // Frame capture loop: 100ms = 10 FPS (paused when correction video modal is open)
   useEffect(() => {
-    if (!isActive || !isConnected || !isSessionActive) {
+    if (!isActive || !isConnected || !isSessionActive || showCorrectionModal) {
       return;
     }
 
@@ -95,11 +105,11 @@ export const LiveSession: React.FC = () => {
     }, 100);
 
     return () => clearInterval(intervalId);
-  }, [isActive, isConnected, isSessionActive, captureFrame, send, exercise]);
+  }, [isActive, isConnected, isSessionActive, showCorrectionModal, captureFrame, send, exercise]);
 
   // WebSocket message handler
   useEffect(() => {
-    if (!lastMessage) return;
+    if (!lastMessage || showCorrectionModal) return;
 
     const data =
       typeof lastMessage === 'string'
@@ -117,7 +127,12 @@ export const LiveSession: React.FC = () => {
     if (typeof data.rep_count === 'number') {
       if (data.rep_count > prevRepCountRef.current) {
         soundEngine.playSuccessChime();
+        soundEngine.speak(t('speech_rep_completed'), getSpeechLocale());
         prevRepCountRef.current = data.rep_count;
+        // Clean rep reduces fault count
+        if (consecutiveFaultsRef.current > 0) {
+          consecutiveFaultsRef.current = Math.max(0, consecutiveFaultsRef.current - 1);
+        }
       }
       setRepCount(data.rep_count);
     }
@@ -143,19 +158,53 @@ export const LiveSession: React.FC = () => {
       setFormStatus(data.form_status);
     }
 
-    // AI Coach multi-sensory feedback (Buzzer + Spoken Cue)
+    // AI Coach multi-sensory feedback (Buzzer + Spoken Cue + Defect Detection)
     if (data.ai_coach) {
       setAiCoach(data.ai_coach);
       const coach = data.ai_coach;
 
-      if (coach.buzzer_type === 'danger') {
+      const isDefect = coach.should_stop || coach.buzzer_type === 'danger' || data.form_status === 'error';
+
+      if (isDefect) {
+        consecutiveFaultsRef.current += 1;
         soundEngine.playBuzzer('danger');
+
+        // Pinpoint anatomical fault area and speech instruction
+        const fbStr = (data.feedback || []).join(' ').toLowerCase();
+        let targetArea = t('fault_area_elbow');
+        let targetDesc = t('fault_msg_elbow_drift');
+        let speechMsg = t('speech_fault_elbow');
+
+        if (fbStr.includes('swing') || fbStr.includes('torso') || fbStr.includes('back')) {
+          targetArea = t('fault_area_spine');
+          targetDesc = t('fault_msg_torso_swing');
+          speechMsg = t('speech_fault_swing');
+        } else if (fbStr.includes('valgus') || fbStr.includes('knee')) {
+          targetArea = t('fault_area_knee');
+          targetDesc = t('fault_msg_knee_valgus');
+          speechMsg = t('speech_fault_prefix') + ' ' + t('fault_msg_knee_valgus');
+        } else if (fbStr.includes('extend') || fbStr.includes('incomplete')) {
+          targetArea = t('fault_area_rom');
+          targetDesc = t('fault_msg_incomplete_ext');
+          speechMsg = t('speech_fault_incomplete');
+        }
+
+        setFaultArea(targetArea);
+        setFaultDesc(targetDesc);
+
+        const now = Date.now();
+        if (now - lastSpokenFaultTimeRef.current > 2500) {
+          lastSpokenFaultTimeRef.current = now;
+          soundEngine.speak(speechMsg, getSpeechLocale(), true);
+        }
+
+        // If patient accumulates 2 or more defective repetitions/movements:
+        // Automatically halt the workout and present the interactive biomechanical video modal!
+        if (consecutiveFaultsRef.current >= 2) {
+          setShowCorrectionModal(true);
+        }
       } else if (coach.buzzer_type === 'warning') {
         soundEngine.playBuzzer('warning');
-      }
-
-      if (coach.voice_cue) {
-        soundEngine.speak(coach.voice_cue, coach.should_stop);
       }
     }
 
@@ -165,7 +214,20 @@ export const LiveSession: React.FC = () => {
     if (data.session_id) {
       setSessionId(data.session_id);
     }
-  }, [lastMessage]);
+  }, [lastMessage, showCorrectionModal, t, getSpeechLocale]);
+
+  const handleDismissCorrectionModal = () => {
+    setShowCorrectionModal(false);
+    consecutiveFaultsRef.current = 0;
+  };
+
+  const handleManualOpenVideoGuide = () => {
+    setFaultArea(exercise === 'bicep_curl' ? t('fault_area_elbow') : t('fault_area_knee'));
+    setFaultDesc(
+      exercise === 'bicep_curl' ? t('fault_msg_elbow_drift') : t('fault_msg_knee_valgus')
+    );
+    setShowCorrectionModal(true);
+  };
 
   const handleStopWorkout = async () => {
     setIsSessionActive(false);
@@ -174,7 +236,6 @@ export const LiveSession: React.FC = () => {
 
     let targetSessionId = sessionId;
 
-    // If session ID was not sent in WS messages, retrieve newest session from API
     if (!targetSessionId) {
       try {
         const token = localStorage.getItem('physiotrack_jwt');
@@ -228,6 +289,8 @@ export const LiveSession: React.FC = () => {
           aiCoach={aiCoach}
           buzzerEnabled={buzzerEnabled}
           onToggleBuzzer={handleToggleBuzzer}
+          incorrectReps={consecutiveFaultsRef.current}
+          onOpenVideoGuide={handleManualOpenVideoGuide}
         />
       </div>
 
@@ -254,7 +317,15 @@ export const LiveSession: React.FC = () => {
                 : 'bg-slate-800 border-slate-700 text-slate-400'
             }`}
           >
-            <span>{buzzerEnabled ? '🔊 Form Buzzer: ACTIVE' : '🔇 Form Buzzer: MUTED'}</span>
+            <span>{buzzerEnabled ? t('hud_buzzer_on') : t('hud_buzzer_muted')}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleManualOpenVideoGuide}
+            className="px-3 py-1.5 rounded-xl border border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 text-xs font-semibold flex items-center gap-1.5 transition-all"
+          >
+            <span>📹 {t('video_demonstration')}</span>
           </button>
         </div>
 
@@ -267,9 +338,19 @@ export const LiveSession: React.FC = () => {
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
-          <span>End Workout & View Analysis</span>
+          <span>{t('hud_end_workout')}</span>
         </button>
       </div>
+
+      {/* Interactive Biomechanical Video & Posture Correction Modal */}
+      <PostureCorrectionModal
+        isOpen={showCorrectionModal}
+        exercise={exercise}
+        faultArea={faultArea}
+        faultDescription={faultDesc}
+        incorrectRepsCount={consecutiveFaultsRef.current}
+        onDismiss={handleDismissCorrectionModal}
+      />
     </div>
   );
 };

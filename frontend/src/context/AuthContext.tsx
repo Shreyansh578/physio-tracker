@@ -24,6 +24,21 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = 'physiotrack_jwt';
 
+/**
+ * Robust fetch helper that tries relative proxy path first, then direct localhost:8000 fallback
+ */
+export const robustApiFetch = async (path: string, options: RequestInit = {}): Promise<Response> => {
+  const cleanPath = path.startsWith('/') ? path : `/${path}`;
+  try {
+    const res = await fetch(cleanPath, options);
+    return res;
+  } catch (initialErr) {
+    console.warn(`Direct proxy fetch to ${cleanPath} failed, attempting backend fallback on port 8000...`, initialErr);
+    const directUrl = `http://localhost:8000${cleanPath}`;
+    return await fetch(directUrl, options);
+  }
+};
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(() => localStorage.getItem(TOKEN_KEY));
@@ -39,7 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       try {
-        const response = await fetch('http://localhost:8000/api/auth/me', {
+        const response = await robustApiFetch('/api/auth/me', {
           headers: {
             Authorization: `Bearer ${storedToken}`,
           },
@@ -50,7 +65,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setUser(data);
           setToken(storedToken);
         } else {
-          // Token is expired or invalid
           localStorage.removeItem(TOKEN_KEY);
           setToken(null);
           setUser(null);
@@ -68,7 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithGoogleToken = async (credential: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/auth/google', {
+      const res = await robustApiFetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential }),
@@ -91,7 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginWithEmail = async (email: string, password: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/auth/login', {
+      const res = await robustApiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
@@ -114,7 +128,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const registerWithEmail = async (email: string, password: string, name: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/auth/register', {
+      const res = await robustApiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name }),
@@ -137,7 +151,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const loginAsDemo = async (customName?: string, customEmail?: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch('http://localhost:8000/api/auth/google', {
+      const res = await robustApiFetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -148,7 +162,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (!res.ok) {
-        throw new Error('Demo authentication failed');
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Demo authentication failed');
       }
 
       const data = await res.json();

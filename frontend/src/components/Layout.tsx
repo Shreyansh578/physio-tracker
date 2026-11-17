@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage, SUPPORTED_LANGUAGES, type Language } from '../context/LanguageContext';
 import { soundEngine } from '../utils/audioAlerts';
 
 interface LayoutProps {
@@ -11,15 +12,16 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { t, language, setLanguage } = useLanguage();
 
   const getPageTitle = () => {
-    if (location.pathname === '/') return 'Patient Recovery Dashboard';
-    if (location.pathname.startsWith('/session')) return 'Live Vision Workout Session';
-    if (location.pathname.startsWith('/summary')) return 'Session Biomechanical Summary';
-    if (location.pathname.startsWith('/ai-coach')) return 'Dr. Alex - AI Physical Therapy Consultation';
-    if (location.pathname.startsWith('/analytics')) return 'Kinematic Recovery & Trend Analytics';
-    if (location.pathname.startsWith('/library')) return 'Rehabilitation Exercise Encyclopedia';
-    if (location.pathname.startsWith('/settings')) return 'System Settings & Buzzer Calibration';
+    if (location.pathname === '/') return t('title_dashboard');
+    if (location.pathname.startsWith('/session')) return t('title_live_workout');
+    if (location.pathname.startsWith('/summary')) return t('title_summary');
+    if (location.pathname.startsWith('/ai-coach')) return t('title_ai_coach');
+    if (location.pathname.startsWith('/analytics')) return t('title_analytics');
+    if (location.pathname.startsWith('/library')) return t('title_library');
+    if (location.pathname.startsWith('/settings')) return t('title_settings');
     return 'PhysioTrack AI';
   };
 
@@ -31,7 +33,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
   const navLinks = [
     {
       to: '/',
-      label: 'Dashboard',
+      label: t('nav_dashboard'),
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
@@ -41,7 +43,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     },
     {
       to: '/session',
-      label: 'Live Workout',
+      label: t('nav_live_workout'),
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
@@ -52,7 +54,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     },
     {
       to: '/ai-coach',
-      label: 'AI Physio Coach',
+      label: t('nav_ai_coach'),
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
@@ -62,7 +64,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     },
     {
       to: '/analytics',
-      label: 'Analytics & ROM',
+      label: t('nav_analytics'),
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -72,7 +74,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     },
     {
       to: '/library',
-      label: 'Exercise Library',
+      label: t('nav_library'),
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -82,7 +84,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
     },
     {
       to: '/settings',
-      label: 'Settings & Buzzer',
+      label: t('nav_settings'),
       icon: (
         <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -196,7 +198,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
                 </svg>
-                <span>Sign Out</span>
+                <span>{t('nav_sign_out')}</span>
               </button>
             </div>
           ) : (
@@ -205,7 +207,7 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
               onClick={() => navigate('/login')}
               className="w-full py-2 rounded-xl text-xs font-semibold text-white bg-emerald-500 hover:bg-emerald-600 transition-all shadow-md"
             >
-              Sign In
+              {t('nav_sign_in')}
             </button>
           )}
         </div>
@@ -219,14 +221,29 @@ export const Layout: React.FC<LayoutProps> = ({ children }) => {
             {getPageTitle()}
           </h1>
           <div className="flex items-center gap-3">
+            {/* Multi-Language Selector Dropdown */}
+            <div className="relative inline-block">
+              <select
+                value={language}
+                onChange={(e) => setLanguage(e.target.value as Language)}
+                className="bg-slate-800 text-slate-200 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-emerald-500 transition-all cursor-pointer shadow-sm"
+              >
+                {SUPPORTED_LANGUAGES.map((lang) => (
+                  <option key={lang.code} value={lang.code}>
+                    {lang.flag} {lang.nativeLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             {user && (
-              <span className="text-xs text-slate-300 bg-slate-800/80 px-3 py-1 rounded-full border border-slate-700/80 flex items-center gap-2">
+              <span className="text-xs text-slate-300 bg-slate-800/80 px-3 py-1.5 rounded-xl border border-slate-700/80 flex items-center gap-2">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                <span>Patient: <strong>{user.name}</strong></span>
+                <span>{t('nav_patient')}: <strong>{user.name}</strong></span>
               </span>
             )}
-            <span className="text-xs bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-slate-700 flex items-center gap-1.5">
-              <span>WebCam Active</span>
+            <span className="text-xs bg-slate-800 text-slate-300 px-3 py-1.5 rounded-xl border border-slate-700 flex items-center gap-1.5">
+              <span>WebCam 10 FPS</span>
             </span>
           </div>
         </header>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '../context/LanguageContext';
 
 export interface AICoachFeedback {
   should_stop?: boolean;
@@ -7,6 +8,8 @@ export interface AICoachFeedback {
   voice_cue?: string | null;
   clinical_advice?: string;
   severity?: 'critical' | 'warning' | 'good' | 'neutral';
+  fault_area?: string;
+  fault_details?: string;
 }
 
 export interface HUDProps {
@@ -22,6 +25,8 @@ export interface HUDProps {
   aiCoach?: AICoachFeedback;
   buzzerEnabled?: boolean;
   onToggleBuzzer?: () => void;
+  incorrectReps?: number;
+  onOpenVideoGuide?: () => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -37,33 +42,28 @@ export const HUD: React.FC<HUDProps> = ({
   aiCoach,
   buzzerEnabled = true,
   onToggleBuzzer,
+  onOpenVideoGuide,
 }) => {
+  const { t } = useLanguage();
+
   const formatExerciseName = (name: string) => {
     if (!name) return 'EXERCISE';
     return name.replace(/_/g, ' ').toUpperCase();
   };
 
   const formatState = (s?: string) => {
-    if (!s) return 'READY';
+    if (!s) return t('hud_ready_to_curl');
     switch (s) {
       case 'READY_DOWN':
-        return '⬇️ READY TO CURL';
+        return t('hud_ready_to_curl');
       case 'CURLING_UP':
-        return '⚡ CURLING UP';
+        return t('hud_curling_up');
       case 'PEAK':
-        return '🔥 PEAK CONTRACTION';
+        return t('hud_peak_contraction');
       case 'LOWERING':
-        return '⬇️ LOWERING DOWN';
+        return t('hud_lowering_down');
       case 'START':
-        return '⏳ EXTEND ARM DOWN';
-      case 'READY_STAND':
-        return '🧍 STANDING READY';
-      case 'SQUATTING_DOWN':
-        return '⬇️ SQUATTING DOWN';
-      case 'SQUAT_DEPTH':
-        return '🔥 TARGET DEPTH';
-      case 'DRIVING_UP':
-        return '⬆️ DRIVING UP';
+        return t('hud_extend_arm');
       default:
         return s.replace(/_/g, ' ').toUpperCase();
     }
@@ -82,7 +82,7 @@ export const HUD: React.FC<HUDProps> = ({
               ✓
             </span>
             <span className="text-xs font-semibold tracking-wide">
-              {primaryFeedback || 'Good Posture'}
+              {primaryFeedback || t('hud_good_posture')}
             </span>
           </div>
         );
@@ -94,7 +94,7 @@ export const HUD: React.FC<HUDProps> = ({
               !
             </span>
             <span className="text-xs font-semibold tracking-wide">
-              {primaryFeedback || 'Form Caution'}
+              {primaryFeedback || t('hud_form_caution')}
             </span>
           </div>
         );
@@ -106,7 +106,7 @@ export const HUD: React.FC<HUDProps> = ({
               ✕
             </span>
             <span className="text-xs font-semibold tracking-wide">
-              {primaryFeedback || 'Form Correction Needed'}
+              {primaryFeedback || t('hud_form_defect')}
             </span>
           </div>
         );
@@ -131,7 +131,7 @@ export const HUD: React.FC<HUDProps> = ({
     <div className="absolute inset-0 pointer-events-none p-4 md:p-5 flex flex-col justify-between z-10 select-none">
       {/* Top Bar */}
       <div className="flex items-start justify-between w-full gap-3">
-        {/* Top-left: Exercise badge, Accuracy & Buzzer indicator */}
+        {/* Top-left: Exercise badge, Accuracy & Controls */}
         <div className="flex flex-col gap-1.5 pointer-events-auto">
           <div className="bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-slate-700/60 shadow-lg flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -142,7 +142,7 @@ export const HUD: React.FC<HUDProps> = ({
 
           <div className="flex items-center gap-2">
             <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1 rounded-lg border border-slate-800 text-[11px] font-medium text-slate-300 flex items-center gap-2">
-              <span>Accuracy:</span>
+              <span>{t('hud_accuracy')}:</span>
               <span
                 className={`font-bold font-mono ${
                   scorePercent >= 80
@@ -167,7 +167,18 @@ export const HUD: React.FC<HUDProps> = ({
                     : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
                 }`}
               >
-                <span>{buzzerEnabled ? '🔊 Buzzer ON' : '🔇 Muted'}</span>
+                <span>{buzzerEnabled ? t('hud_buzzer_on') : t('hud_buzzer_muted')}</span>
+              </button>
+            )}
+
+            {/* Direct Video Guide Button */}
+            {onOpenVideoGuide && (
+              <button
+                type="button"
+                onClick={onOpenVideoGuide}
+                className="px-2.5 py-1 rounded-lg border border-blue-500/40 bg-blue-950/80 hover:bg-blue-900/80 text-blue-300 text-[11px] font-medium backdrop-blur-md flex items-center gap-1.5 transition-all shadow-md"
+              >
+                <span>📹 Video Guide</span>
               </button>
             )}
           </div>
@@ -186,16 +197,24 @@ export const HUD: React.FC<HUDProps> = ({
 
       {/* Emergency Stop / Critical Form Warning Overlay Banner */}
       {aiCoach?.should_stop && (
-        <div className="self-center my-2 bg-rose-600/95 backdrop-blur-md border-2 border-rose-300 text-white px-5 py-3 rounded-2xl shadow-2xl animate-bounce flex items-center gap-3.5 z-30 max-w-lg">
+        <div className="self-center my-2 bg-rose-600/95 backdrop-blur-md border-2 border-rose-300 text-white px-5 py-3 rounded-2xl shadow-2xl animate-bounce flex items-center gap-3.5 z-30 max-w-lg pointer-events-auto">
           <span className="text-2xl" role="img" aria-label="warning">🚨</span>
           <div>
             <div className="text-xs font-black tracking-wider uppercase text-rose-100">
-              {aiCoach.alert_banner || 'AI COACH: STOP EXERCISE DIRECTIVE'}
+              {t('fault_alert_title')}
             </div>
             <div className="text-[11px] text-white font-semibold mt-0.5">
-              {aiCoach.clinical_advice}
+              {aiCoach.clinical_advice || aiCoach.alert_banner}
             </div>
           </div>
+          {onOpenVideoGuide && (
+            <button
+              onClick={onOpenVideoGuide}
+              className="ml-2 px-3 py-1.5 rounded-xl bg-white text-rose-700 font-bold text-xs hover:bg-rose-50 shadow-md whitespace-nowrap"
+            >
+              Watch Video
+            </button>
+          )}
         </div>
       )}
 
@@ -229,7 +248,7 @@ export const HUD: React.FC<HUDProps> = ({
         {/* Range of Motion (ROM) Progress Bar */}
         <div className="w-56 sm:w-64 bg-slate-950/80 backdrop-blur-md p-2 rounded-xl border border-slate-800/80 shadow-lg flex flex-col gap-1">
           <div className="flex justify-between items-center text-[10px] font-semibold text-slate-400 px-1">
-            <span>Range of Motion</span>
+            <span>{t('hud_rom')}</span>
             <span className="font-mono text-emerald-400">{romPct}%</span>
           </div>
           <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
@@ -258,7 +277,7 @@ export const HUD: React.FC<HUDProps> = ({
             {repCount}
           </span>
           <span className="text-xs font-bold text-slate-400 tracking-widest uppercase mt-1">
-            Completed Reps
+            {t('hud_completed_reps')}
           </span>
         </div>
       </div>
