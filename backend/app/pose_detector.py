@@ -152,15 +152,23 @@ class PoseDetector:
             logger.error(f"Pose detection failed: {err}")
             return None
 
-    def draw_landmarks(self, frame: np.ndarray, detection_result: Any) -> np.ndarray:
-        """Render skeleton connections and joint circles on the image frame.
+    def draw_landmarks(
+        self,
+        frame: np.ndarray,
+        detection_result: Any,
+        telemetry: Optional[Dict[str, Any]] = None,
+    ) -> np.ndarray:
+        """Render skeleton connections, joint highlights, and live telemetry on the image frame.
 
-        Connections are drawn in Cyan (#00FFFF -> BGR: 255, 255, 0).
-        Joints are drawn in Magenta (#FF00FF -> BGR: 255, 0, 255).
+        - Active exercise kinematic chain is drawn in Emerald Green, Amber, or Red based on posture.
+        - Form violation joints are marked with a prominent red alert ring.
+        - The active joint angle (e.g. 58°) is drawn directly beside the joint.
 
         Args:
             frame: Input BGR image array.
             detection_result: PoseLandmarkerResult or container with pose_landmarks attribute.
+            telemetry: Optional evaluation dictionary containing active_joints, error_joints,
+                angle, form_status, and feedback.
 
         Returns:
             np.ndarray: Annotated BGR image frame.
@@ -181,6 +189,30 @@ class PoseDetector:
         annotated = frame.copy()
         height, width = frame.shape[:2]
 
+        # Extract telemetry parameters
+        active_joints = set()
+        error_joints = set()
+        active_angle: Optional[float] = None
+        form_status = "good"
+
+        if telemetry:
+            active_joints = set(telemetry.get("active_joints", []))
+            error_joints = set(telemetry.get("error_joints", []))
+            form_status = telemetry.get("form_status", "good")
+            if "angle" in telemetry and isinstance(telemetry["angle"], (int, float)):
+                active_angle = float(telemetry["angle"])
+
+        # Determine active chain color based on posture
+        if form_status == "error":
+            active_color = (40, 40, 240)  # Vivid Red
+        elif form_status == "warning":
+            active_color = (0, 165, 255)  # Amber
+        else:
+            active_color = (30, 220, 60)  # Emerald Green
+
+        default_bone_color = (220, 200, 40)  # Soft cyan
+        default_joint_color = (255, 60, 180)  # Magenta
+
         def _get_coords(lm: Any) -> Tuple[float, float]:
             if hasattr(lm, "x") and hasattr(lm, "y"):
                 return float(lm.x), float(lm.y)
@@ -191,7 +223,7 @@ class PoseDetector:
             return 0.0, 0.0
 
         for landmarks in pose_landmarks_list:
-            # 1. Draw skeleton connection lines (Cyan: BGR (255, 255, 0))
+            # 1. Draw skeleton connection lines
             for start_idx, end_idx in POSE_CONNECTIONS:
                 if start_idx < len(landmarks) and end_idx < len(landmarks):
                     lm1 = landmarks[start_idx]
@@ -204,15 +236,55 @@ class PoseDetector:
                         x2_n, y2_n = _get_coords(lm2)
                         x1, y1 = int(x1_n * width), int(y1_n * height)
                         x2, y2 = int(x2_n * width), int(y2_n * height)
-                        cv2.line(annotated, (x1, y1), (x2, y2), (255, 255, 0), thickness=2)
 
-            # 2. Draw joint landmark circles (Magenta: BGR (255, 0, 255))
-            for lm in landmarks:
+                        # Highlight active exercise chain
+                        if start_idx in active_joints and end_idx in active_joints:
+                            cv2.line(annotated, (x1, y1), (x2, y2), active_color, thickness=3, lineType=cv2.LINE_AA)
+                        else:
+                            cv2.line(annotated, (x1, y1), (x2, y2), default_bone_color, thickness=2, lineType=cv2.LINE_AA)
+
+            # 2. Draw joint landmark circles
+            for idx, lm in enumerate(landmarks):
                 vis = getattr(lm, "visibility", 1.0)
                 if vis is None or vis > 0.3:
                     x_n, y_n = _get_coords(lm)
                     x, y = int(x_n * width), int(y_n * height)
-                    cv2.circle(annotated, (x, y), radius=4, color=(255, 0, 255), thickness=-1)
+
+                    # Prominent red ring for joints violating posture
+                    if idx in error_joints:
+                        cv2.circle(annotated, (x, y), radius=9, color=(30, 30, 240), thickness=-1, lineType=cv2.LINE_AA)
+                        cv2.circle(annotated, (x, y), radius=13, color=(255, 255, 255), thickness=2, lineType=cv2.LINE_AA)
+                    elif idx in active_joints:
+                        cv2.circle(annotated, (x, y), radius=6, color=active_color, thickness=-1, lineType=cv2.LINE_AA)
+                        cv2.circle(annotated, (x, y), radius=8, color=(255, 255, 255), thickness=1, lineType=cv2.LINE_AA)
+                    else:
+                        cv2.circle(annotated, (x, y), radius=4, color=default_joint_color, thickness=-1, lineType=cv2.LINE_AA)
+
+            # 3. Draw live angle pill on active vertex joint (e.g. elbow or knee)
+            # Active vertex is typically elbow (13 or 14) or knee (25 or 26)
+            if active_angle is not None and active_angle > 0.0:
+                vertex_candidates = [14, 13, 26, 25]
+                for v_idx in vertex_candidates:
+                    if v_idx in active_joints and v_idx < len(landmarks):
+                        vx_n, vy_n = _get_coords(landmarks[v_idx])
+                        vx = int(vx_n * width)
+                        vy = int(vy_n * height)
+
+                        angle_str = f"{int(round(active_angle))} deg"
+                        font = cv2.FONT_HERSHEY_SIMPLEX
+                        scale = 0.45
+                        thickness = 1
+                        (tw, th), baseline = cv2.getTextSize(angle_str, font, scale, thickness)
+
+                        # Place badge slightly to the right of joint
+                        bx = min(width - tw - 12, vx + 12)
+                        by = max(th + 10, vy - 10)
+
+                        # Dark pill background with border
+                        cv2.rectangle(annotated, (bx - 5, by - th - 5), (bx + tw + 5, by + 5), (15, 23, 42), -1)
+                        cv2.rectangle(annotated, (bx - 5, by - th - 5), (bx + tw + 5, by + 5), active_color, 1, lineType=cv2.LINE_AA)
+                        cv2.putText(annotated, angle_str, (bx, by), font, scale, (255, 255, 255), thickness, cv2.LINE_AA)
+                        break
 
         return annotated
 

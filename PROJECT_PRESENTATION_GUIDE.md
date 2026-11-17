@@ -74,34 +74,49 @@ The dot product formula involves division by vector magnitudes and $\arccos()$. 
 - **Right Arm:** Shoulder ($12$), Elbow ($14$), Wrist ($16$)
 - **Torso Anchor (Hip):** Left Hip ($23$), Right Hip ($24$)
 
-#### 2. Repetition State Machine
-- **Extended / Relaxed Position (DOWN):** $\theta_{\text{elbow}} > 135^\circ$
-  - The arm is extended downward under eccentric control.
-- **Concentric Contraction Peak (UP):** $\theta_{\text{elbow}} < 70^\circ$
-  - Forearm is flexed toward the shoulder, achieving peak bicep recruitment.
-- **In-Between Transition (CURLING):** $70^\circ \le \theta_{\text{elbow}} \le 135^\circ$
-- **Rep Count Trigger:** Occurs on the state transition from $\text{UP} \rightarrow \text{DOWN}$ (with a minimum $0.4\text{s}$ debounce cooldown to prevent jitter noise).
+#### 2. Robust Finite State Machine (Full-Cycle Verification)
+To prevent accidental counts (e.g. sitting with bent arm at a desk and then straightening the hand), the system strictly enforces a **5-stage deterministic cycle**:
 
 ```
-   [START]
-      │
-      ▼
-   [DOWN] (Elbow > 135°)
-      │  ▲
-Curling  │  │ Returning Down
-   Up │  │ (Rep Count + 1)
-      ▼  │
-    [UP] (Elbow < 70°)
+   [START / CALIBRATION]
+            │
+            ▼ (Arm extended downwards: θ ≥ 140°, wrist below elbow)
+     [READY_DOWN]  ◄──────────────────────────────────────┐
+            │                                             │
+            ▼ (Concentric flexion: θ < 125°, wrist rising)│
+     [CURLING_UP]                                         │
+            │                                             │
+            ▼ (Peak contraction: θ ≤ 65°, wrist > elbow) │
+       [PEAK_UP]                                          │ (Rep Count + 1
+            │                                             │  ONLY if peak
+            ▼ (Eccentric extension: θ > 85°)             │  was achieved)
+       [LOWERING] ────────────────────────────────────────┘
 ```
 
-#### 3. Form Evaluation & Penalties
-- **Elbow Flare / Torso Drift:**
-  - Evaluates the angle formed at the shoulder by the elbow and the hip: $\angle(\text{Elbow}, \text{Shoulder}, \text{Hip})$.
-  - **Healthy Physiotherapy Target:** $\le 30^\circ$ (elbow pinned comfortably close to the ribcage).
-  - **Error Threshold:** If $\text{arm\_body\_angle} > 30^\circ$:
-    $$\text{Penalty} = \min\left(0.3, \frac{\text{arm\_body\_angle} - 30^\circ}{40^\circ} \times 0.3 + 0.1\right)$$
-    - **Corrective Cue:** *"Keep your elbow closer to your body"*
-    - **Biomechanical Justification:** Flaring the elbow recruits anterior deltoids and supraspinatus compensatory torque, reducing isolation of the biceps brachii and increasing impingement risk.
+1. **`START`:** The user initializes. **No reps can ever count from `START`!**
+2. **`READY_DOWN` (Baseline Priming):** Requires elbow angle $\theta_{\text{elbow}} \ge 140^\circ$ and $y_{\text{wrist}} > y_{\text{elbow}} - 0.04$ for at least 2 consecutive frames. This confirms the arm is straight and extended.
+3. **`CURLING_UP`:** Arm flexes upward ($\theta_{\text{elbow}} < 125^\circ$). If the user lowers their arm without reaching peak, the cycle resets cleanly with an *"Incomplete rep"* warning and **no rep is counted**.
+4. **`PEAK_UP`:** Full contraction achieved ($\theta_{\text{elbow}} \le 65^\circ$ with $y_{\text{wrist}} < y_{\text{elbow}} - 0.04$).
+5. **`LOWERING`:** Controlled eccentric descent ($\theta_{\text{elbow}} > 85^\circ$).
+6. **Rep Completion:** Re-entering $\theta_{\text{elbow}} \ge 140^\circ$ registers $+1$ repetition only if `peak_reached == True` and rep duration $\ge 0.85\text{s}$.
+
+#### 3. Real-Time Form Analysis & Penalties
+- **Elbow Flare Out (Abduction):**
+  - Measures angle $\angle(\text{Elbow}, \text{Shoulder}, \text{Hip})$ at the shoulder.
+  - **Threshold:** $> 28^\circ$.
+  - **Cue:** ⚠️ *"Keep elbow tucked close to your torso"*
+  - **Visual:** Offending elbow turns red on skeleton. Penalty: $-0.25$.
+- **Torso Sway / Lower-Back Cheating:**
+  - Measures the tilt angle of the spine vector $(\text{Shoulder} - \text{Hip})$ from the vertical axis.
+  - **Threshold:** $> 16^\circ$ deviation during concentric curl.
+  - **Cue:** ⚠️ *"Avoid swinging your torso — maintain strict upright posture"*
+  - **Visual:** Spine / torso line turns red. Penalty: $-0.30$.
+- **Incomplete Range of Motion:**
+  - Abandoning curl before $\le 65^\circ$ or failing to extend to $\ge 140^\circ$.
+  - **Cue:** ⚠️ *"Incomplete rep — squeeze at peak and extend fully"*
+- **Movement Cadence:**
+  - Total rep cycle $< 1.0\text{s}$ flags jerky momentum lifting.
+  - **Cue:** ⚠️ *"Slow down for controlled muscle activation"*
 
 ---
 
@@ -112,26 +127,25 @@ Curling  │  │ Returning Down
 - **Right Leg:** Hip ($24$), Knee ($26$), Ankle ($28$)
 - **Torso Anchor (Shoulder):** Left Shoulder ($11$), Right Shoulder ($12$)
 
-#### 2. Repetition State Machine
-- **Standing Position (UP):** $\theta_{\text{knee}} > 145^\circ$
-  - Quadriceps and gluteus maximus fully extended.
-- **Squat Inflection (DOWN):** $\theta_{\text{knee}} < 120^\circ$
-  - Lowering thighs to at least $120^\circ$ knee flexion (accessible clinical squat depth).
-- **Rep Count Trigger:** Occurs on the transition from $\text{DOWN} \rightarrow \text{UP}$ (with a $0.5\text{s}$ debounce cooldown).
+#### 2. Robust Finite State Machine
+- **`READY_STAND`:** Both knees $\theta_{\text{knee}} \ge 150^\circ$, hips positioned vertically above knees.
+- **`SQUATTING_DOWN`:** Knees bending ($\theta_{\text{knee}} < 145^\circ$), hips sinking down.
+- **`SQUAT_DEPTH`:** Functional clinical depth achieved ($\theta_{\text{knee}} \le 118^\circ$).
+- **`DRIVING_UP`:** Ascending through heels ($\theta_{\text{knee}} > 125^\circ$).
+- **Rep Completion:** Returning to standing lockout ($\ge 148^\circ$) after achieving depth with duration $\ge 0.9\text{s}$.
 
-#### 3. Form Evaluation & Penalties
-- **Excessive Forward Trunk Lean (Back Angle):**
-  - Evaluates the hip angle: $\angle(\text{Shoulder}, \text{Hip}, \text{Knee})$.
-  - **Error Threshold:** If $\text{back\_angle} < 45^\circ$:
-    - **Penalty:** $-0.30$ deduction.
-    - **Corrective Cue:** *"Keep your back straighter"*
-    - **Biomechanical Justification:** An acute back angle shifts the center of gravity forward, producing severe shear forces on the lumbar vertebrae ($L4-L5/S1$).
-- **Knees Past Toes (Anterior Shear):**
-  - Measures the horizontal distance $x_{\text{knee}} - x_{\text{ankle}}$ relative to facing direction.
-  - **Error Threshold:** If $\Delta x_{\text{knee-ankle}} > 0.08$ (normalized image width) and $\theta_{\text{knee}} < 130^\circ$:
-    - **Penalty:** $-0.30$ deduction.
-    - **Corrective Cue:** *"Don't let your knees go past your toes"*
-    - **Biomechanical Justification:** Excessive anterior knee travel creates high patellofemoral compressive force and stress on the patellar tendon.
+#### 3. Real-Time Form Analysis & Penalties
+- **Excessive Forward Trunk Lean (Chest Down):**
+  - Evaluates torso tilt from vertical axis: $> 36^\circ$ while squatting.
+  - **Cue:** ⚠️ *"Chest up! Avoid bending too far forward at the waist"*
+  - **Biomechanical Justification:** Protects $L4-L5/S1$ lumbar vertebrae from shear forces. Penalty: $-0.30$.
+- **Knees Past Toes (Anterior Knee Shear):**
+  - Measures horizontal displacement of knee past ankle: $\Delta x_{\text{knee-ankle}} > 0.08$ when $\theta_{\text{knee}} < 130^\circ$.
+  - **Cue:** ⚠️ *"Push hips back — prevent knees driving past toes"*
+  - **Biomechanical Justification:** Alleviates patellofemoral compressive stress. Penalty: $-0.25$.
+- **Shallow Squat Depth:**
+  - Ascending before reaching $\le 118^\circ$ knee flexion.
+  - **Cue:** ⚠️ *"Incomplete squat — squat deeper to parallel"*
 
 ---
 

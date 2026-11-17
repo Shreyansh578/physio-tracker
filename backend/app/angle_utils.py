@@ -69,3 +69,38 @@ def get_joint_angle(landmarks: Any, idx_a: int, idx_b: int, idx_c: int) -> float
     b = _extract_xy(landmarks[idx_b])
     c = _extract_xy(landmarks[idx_c])
     return calculate_angle(a, b, c)
+
+
+def calculate_torso_tilt(shoulder: Point2D, hip: Point2D) -> float:
+    """Calculate the absolute tilt angle (in degrees) of the torso line from the vertical axis.
+
+    An upright torso returns ~0.0 degrees. Leaning forward or backward increases the angle.
+
+    Args:
+        shoulder: (x, y) coordinates of shoulder.
+        hip: (x, y) coordinates of hip.
+
+    Returns:
+        float: Tilt in degrees [0.0, 90.0].
+    """
+    dx = float(shoulder[0]) - float(hip[0])
+    dy = float(shoulder[1]) - float(hip[1])
+    radians = np.arctan2(abs(dx), max(abs(dy), 1e-6))
+    return float(np.degrees(radians))
+
+
+def get_joint_distance(landmarks: Any, idx_a: int, idx_b: int) -> float:
+    """Calculate Euclidean distance between two landmark coordinates in normalized space.
+
+    Args:
+        landmarks: Collection of landmarks.
+        idx_a: Index of first landmark.
+        idx_b: Index of second landmark.
+
+    Returns:
+        float: Normalized Euclidean distance.
+    """
+    ax, ay = _extract_xy(landmarks[idx_a])
+    bx, by = _extract_xy(landmarks[idx_b])
+    return float(np.sqrt((ax - bx) ** 2 + (ay - by) ** 2))
+

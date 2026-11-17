@@ -153,22 +153,37 @@ class VideoWebSocketHandler:
                     rep_count = result["rep_count"]
                     state = result["state"]
                     feedback = result["feedback"]
+                    form_status = result.get("form_status", "good")
                     form_score = result["form_score"]
                     angle = result.get("angle", 0.0)
+                    rom_pct = result.get("rom_pct", 0)
+                    checkpoints = result.get("checkpoints", {})
 
                     self.form_scores.append(form_score)
                     for item in feedback:
-                        if item not in self.feedback_history:
+                        # Log corrective feedback cues for the post-workout summary report
+                        if any(kw in item.lower() for kw in ("keep", "avoid", "elbow", "chest", "knees", "incomplete", "slow")):
                             self.feedback_history.append(item)
                 else:
                     rep_count = self.exercise.rep_count if self.exercise else 0
                     state = self.exercise.state if self.exercise else "NO_POSE"
                     feedback = ["No person detected. Step into camera view."]
+                    form_status = "warning"
                     form_score = 0.0
                     angle = 0.0
+                    rom_pct = 0
+                    checkpoints = {
+                        "Detection": "No Person",
+                    }
+                    result = {
+                        "form_status": "warning",
+                        "active_joints": [],
+                        "error_joints": [],
+                        "angle": 0.0,
+                    }
 
-                # 5. Draw landmarks on frame
-                annotated_frame = self.pose_detector.draw_landmarks(frame, detection_result)
+                # 5. Draw landmarks and visual telemetry on frame
+                annotated_frame = self.pose_detector.draw_landmarks(frame, detection_result, telemetry=result)
 
                 # 6. Encode annotated frame back to base64 JPEG (quality 80)
                 encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
@@ -182,8 +197,11 @@ class VideoWebSocketHandler:
                     "rep_count": rep_count,
                     "state": state,
                     "feedback": feedback,
+                    "form_status": form_status,
                     "form_score": form_score,
                     "angle": angle,
+                    "rom_pct": rom_pct,
+                    "checkpoints": checkpoints,
                     "session_id": self.session_id,
                     "frame": encoded_frame_b64,
                 })

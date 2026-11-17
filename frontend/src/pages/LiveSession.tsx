@@ -17,6 +17,9 @@ export const LiveSession: React.FC = () => {
   const [formStatus, setFormStatus] = useState<'good' | 'warning' | 'error'>('good');
   const [exerciseState, setExerciseState] = useState<string>('');
   const [motionAngle, setMotionAngle] = useState<number>(0);
+  const [romPct, setRomPct] = useState<number>(0);
+  const [formScore, setFormScore] = useState<number>(1.0);
+  const [checkpoints, setCheckpoints] = useState<Record<string, string>>({});
   const [annotatedFrame, setAnnotatedFrame] = useState<string | null>(null);
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -103,10 +106,21 @@ export const LiveSession: React.FC = () => {
     if (typeof data.angle === 'number') {
       setMotionAngle(data.angle);
     }
+    if (typeof data.rom_pct === 'number') {
+      setRomPct(data.rom_pct);
+    }
+    if (data.checkpoints && typeof data.checkpoints === 'object') {
+      setCheckpoints(data.checkpoints);
+    }
     if (Array.isArray(data.feedback)) {
       setFeedback(data.feedback);
     }
     if (typeof data.form_score === 'number') {
+      setFormScore(data.form_score);
+    }
+    if (data.form_status === 'good' || data.form_status === 'warning' || data.form_status === 'error') {
+      setFormStatus(data.form_status);
+    } else if (typeof data.form_score === 'number') {
       const score = data.form_score;
       if (score >= 0.8) {
         setFormStatus('good');
@@ -175,6 +189,9 @@ export const LiveSession: React.FC = () => {
           feedback={feedback}
           state={exerciseState}
           angle={motionAngle}
+          romPct={romPct}
+          formScore={formScore}
+          checkpoints={checkpoints}
         />
       </div>
 
