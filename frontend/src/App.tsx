@@ -5,6 +5,10 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { LiveSession } from './pages/LiveSession';
 import { SessionSummary } from './pages/SessionSummary';
+import { AICoach } from './pages/AICoach';
+import { Analytics } from './pages/Analytics';
+import { ExerciseLibrary } from './pages/ExerciseLibrary';
+import { Settings } from './pages/Settings';
 import { Login } from './pages/Login';
 
 // Protected route component enforcing Google OAuth / JWT authentication
@@ -60,6 +64,46 @@ export const AppRoutes: React.FC = () => {
           <ProtectedRoute>
             <Layout>
               <SessionSummary />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-coach"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <AICoach />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/analytics"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Analytics />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/library"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <ExerciseLibrary />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/settings"
+        element={
+          <ProtectedRoute>
+            <Layout>
+              <Settings />
             </Layout>
           </ProtectedRoute>
         }

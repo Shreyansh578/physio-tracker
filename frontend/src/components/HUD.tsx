@@ -1,5 +1,14 @@
 import React from 'react';
 
+export interface AICoachFeedback {
+  should_stop?: boolean;
+  buzzer_type?: 'danger' | 'warning' | 'success' | 'none';
+  alert_banner?: string | null;
+  voice_cue?: string | null;
+  clinical_advice?: string;
+  severity?: 'critical' | 'warning' | 'good' | 'neutral';
+}
+
 export interface HUDProps {
   repCount: number;
   exercise: string;
@@ -10,6 +19,9 @@ export interface HUDProps {
   romPct?: number;
   formScore?: number;
   checkpoints?: Record<string, string>;
+  aiCoach?: AICoachFeedback;
+  buzzerEnabled?: boolean;
+  onToggleBuzzer?: () => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -22,6 +34,9 @@ export const HUD: React.FC<HUDProps> = ({
   romPct = 0,
   formScore = 1.0,
   checkpoints = {},
+  aiCoach,
+  buzzerEnabled = true,
+  onToggleBuzzer,
 }) => {
   const formatExerciseName = (name: string) => {
     if (!name) return 'EXERCISE';
@@ -116,8 +131,8 @@ export const HUD: React.FC<HUDProps> = ({
     <div className="absolute inset-0 pointer-events-none p-4 md:p-5 flex flex-col justify-between z-10 select-none">
       {/* Top Bar */}
       <div className="flex items-start justify-between w-full gap-3">
-        {/* Top-left: Exercise badge & Form score */}
-        <div className="flex flex-col gap-1.5">
+        {/* Top-left: Exercise badge, Accuracy & Buzzer indicator */}
+        <div className="flex flex-col gap-1.5 pointer-events-auto">
           <div className="bg-slate-900/85 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-slate-700/60 shadow-lg flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
             <span className="text-white font-bold text-xs tracking-wider uppercase">
@@ -125,19 +140,36 @@ export const HUD: React.FC<HUDProps> = ({
             </span>
           </div>
 
-          <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1 rounded-lg border border-slate-800 text-[11px] font-medium text-slate-300 flex items-center gap-2">
-            <span>Accuracy:</span>
-            <span
-              className={`font-bold font-mono ${
-                scorePercent >= 80
-                  ? 'text-emerald-400'
-                  : scorePercent >= 60
-                  ? 'text-amber-400'
-                  : 'text-rose-400'
-              }`}
-            >
-              {scorePercent}%
-            </span>
+          <div className="flex items-center gap-2">
+            <div className="bg-slate-900/80 backdrop-blur-md px-3 py-1 rounded-lg border border-slate-800 text-[11px] font-medium text-slate-300 flex items-center gap-2">
+              <span>Accuracy:</span>
+              <span
+                className={`font-bold font-mono ${
+                  scorePercent >= 80
+                    ? 'text-emerald-400'
+                    : scorePercent >= 60
+                    ? 'text-amber-400'
+                    : 'text-rose-400'
+                }`}
+              >
+                {scorePercent}%
+              </span>
+            </div>
+
+            {/* Interactive Audio Buzzer Toggle */}
+            {onToggleBuzzer && (
+              <button
+                type="button"
+                onClick={onToggleBuzzer}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium backdrop-blur-md flex items-center gap-1.5 transition-all ${
+                  buzzerEnabled
+                    ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/80'
+                    : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>{buzzerEnabled ? '🔊 Buzzer ON' : '🔇 Muted'}</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -151,6 +183,21 @@ export const HUD: React.FC<HUDProps> = ({
           )}
         </div>
       </div>
+
+      {/* Emergency Stop / Critical Form Warning Overlay Banner */}
+      {aiCoach?.should_stop && (
+        <div className="self-center my-2 bg-rose-600/95 backdrop-blur-md border-2 border-rose-300 text-white px-5 py-3 rounded-2xl shadow-2xl animate-bounce flex items-center gap-3.5 z-30 max-w-lg">
+          <span className="text-2xl" role="img" aria-label="warning">🚨</span>
+          <div>
+            <div className="text-xs font-black tracking-wider uppercase text-rose-100">
+              {aiCoach.alert_banner || 'AI COACH: STOP EXERCISE DIRECTIVE'}
+            </div>
+            <div className="text-[11px] text-white font-semibold mt-0.5">
+              {aiCoach.clinical_advice}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Middle-Right: Clinical Posture Checkpoints Panel */}
       {checkpoints && Object.keys(checkpoints).length > 0 && (

@@ -13,6 +13,8 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   loginWithGoogleToken: (credential: string) => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<void>;
+  registerWithEmail: (email: string, password: string, name: string) => Promise<void>;
   loginAsDemo: (customName?: string, customEmail?: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
@@ -45,7 +47,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         if (response.ok) {
           const data = await response.json();
-          setUser(data.user);
+          setUser(data);
           setToken(storedToken);
         } else {
           // Token is expired or invalid
@@ -55,7 +57,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch (err) {
         console.warn('Could not verify existing session token:', err);
-        // Fall back to decoded payload or clear
       } finally {
         setIsLoading(false);
       }
@@ -76,6 +77,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.detail || 'Google sign-in failed');
+      }
+
+      const data = await res.json();
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      setToken(data.access_token);
+      setUser(data.user);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loginWithEmail = async (email: string, password: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Invalid email or password');
+      }
+
+      const data = await res.json();
+      localStorage.setItem(TOKEN_KEY, data.access_token);
+      setToken(data.access_token);
+      setUser(data.user);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const registerWithEmail = async (email: string, password: string, name: string) => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Account registration failed');
       }
 
       const data = await res.json();
@@ -126,6 +173,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         isLoading,
         loginWithGoogleToken,
+        loginWithEmail,
+        registerWithEmail,
         loginAsDemo,
         logout,
         isAuthenticated: !!token && !!user,

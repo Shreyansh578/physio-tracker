@@ -13,6 +13,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from app.auth import decode_access_token
 from app.database import create_session, update_session
 from app.exercises import Exercise, get_exercise
+from app.llm_coach import evaluate_live_form_coaching
 from app.pose_detector import PoseDetector
 
 logger = logging.getLogger(__name__)
@@ -190,17 +191,28 @@ class VideoWebSocketHandler:
                         "angle": 0.0,
                     }
 
-                # 5. Draw landmarks and visual telemetry on frame
+                # 5. Run real-time AI Physical Therapy & Biomechanical Coach
+                ai_coach = evaluate_live_form_coaching(
+                    exercise=exercise_name,
+                    rep_count=rep_count,
+                    angle=angle,
+                    rom_pct=rom_pct,
+                    state=state,
+                    checkpoints=checkpoints,
+                    recent_feedback=feedback,
+                )
+
+                # 6. Draw landmarks and visual telemetry on frame
                 annotated_frame = self.pose_detector.draw_landmarks(frame, detection_result, telemetry=result)
 
-                # 6. Encode annotated frame back to base64 JPEG (quality 80)
+                # 7. Encode annotated frame back to base64 JPEG (quality 80)
                 encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), 80]
                 success, buffer = cv2.imencode(".jpg", annotated_frame, encode_params)
                 encoded_frame_b64 = (
                     base64.b64encode(buffer).decode("utf-8") if success else ""
                 )
 
-                # 7. Send JSON response
+                # 8. Send JSON response
                 await websocket.send_json({
                     "rep_count": rep_count,
                     "state": state,
@@ -210,6 +222,7 @@ class VideoWebSocketHandler:
                     "angle": angle,
                     "rom_pct": rom_pct,
                     "checkpoints": checkpoints,
+                    "ai_coach": ai_coach,
                     "session_id": self.session_id,
                     "frame": encoded_frame_b64,
                 })

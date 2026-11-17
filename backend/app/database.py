@@ -1,9 +1,12 @@
-"""Asynchronous SQLite database operations for user profiles and workout session history."""
+"""Asynchronous SQLite database operations for user profiles, workout sessions, and analytics."""
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import logging
+import os
 from pathlib import Path
+import secrets
 from typing import Any, Dict, List, Optional
 import aiosqlite
 
@@ -14,17 +17,34 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 DB_PATH = BACKEND_DIR / "data" / "physio.db"
 
 
-async def init_db(db_path: Optional[Path] = None) -> None:
-    """Initialize the SQLite database, create directories, users table, and session schema.
+def hash_password(password: str) -> str:
+    """Hash a plain text password using PBKDF2-HMAC-SHA256 with a unique random salt."""
+    salt = secrets.token_hex(16)
+    pwd_hash = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000
+    ).hex()
+    return f"{salt}:{pwd_hash}"
 
-    Args:
-        db_path: Optional custom path to SQLite database. Defaults to data/physio.db.
-    """
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a plain text password against stored salt:hash string."""
+    try:
+        salt, pwd_hash = stored_hash.split(":")
+        candidate_hash = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt.encode("utf-8"), 100_000
+        ).hex()
+        return secrets.compare_digest(candidate_hash, pwd_hash)
+    except Exception:
+        return False
+
+
+async def init_db(db_path: Optional[Path] = None) -> None:
+    """Initialize the SQLite database, create directories, users table, and session schema."""
     path = db_path or DB_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
 
     async with aiosqlite.connect(str(path)) as db:
-        # 1. Users table for Google OAuth profiles
+        # 1. Users table (supports both Google OAuth and manual email/password accounts)
         await db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -32,6 +52,7 @@ async def init_db(db_path: Optional[Path] = None) -> None:
                 email TEXT NOT NULL UNIQUE,
                 name TEXT NOT NULL,
                 picture TEXT,
+                password_hash TEXT,
                 created_at TEXT NOT NULL
             )
             """
@@ -53,10 +74,17 @@ async def init_db(db_path: Optional[Path] = None) -> None:
             """
         )
 
-        # Check if user_id column exists in existing database; add if missing
+        # Check existing columns in users table and add missing ones
+        cursor = await db.execute("PRAGMA table_info(users)")
+        user_cols = [row[1] for row in await cursor.fetchall()]
+        if "password_hash" not in user_cols:
+            await db.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+            logger.info("Migrated users table with password_hash column")
+
+        # Check existing columns in sessions table and add missing ones
         cursor = await db.execute("PRAGMA table_info(sessions)")
-        columns = [row[1] for row in await cursor.fetchall()]
-        if "user_id" not in columns:
+        sess_cols = [row[1] for row in await cursor.fetchall()]
+        if "user_id" not in sess_cols:
             await db.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT")
             logger.info("Migrated sessions table with user_id column")
 
@@ -71,18 +99,7 @@ async def upsert_user(
     picture: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Insert or update a user profile from Google OAuth.
-
-    Args:
-        user_id: Unique Google user ID (e.g. google_12345).
-        email: User email address.
-        name: Full user display name.
-        picture: Avatar URL.
-        db_path: Optional path to SQLite database.
-
-    Returns:
-        dict: User profile record.
-    """
+    """Insert or update a user profile from Google OAuth."""
     path = db_path or DB_PATH
     now = datetime.now(timezone.utc).isoformat()
 
@@ -97,14 +114,82 @@ async def upsert_user(
                 name = excluded.name,
                 picture = excluded.picture
             """,
-            (user_id, email, name, picture or "", now),
+            (user_id, email.lower().strip(), name.strip(), picture or "", now),
         )
         await db.commit()
 
         cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
         row = await cursor.fetchone()
         assert row is not None
-        return dict(row)
+        user_dict = dict(row)
+        user_dict.pop("password_hash", None)
+        return user_dict
+
+
+async def register_user_email(
+    email: str,
+    password: str,
+    name: str,
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Register a new user account with manual email and password."""
+    path = db_path or DB_PATH
+    cleaned_email = email.lower().strip()
+    cleaned_name = name.strip() or cleaned_email.split("@")[0]
+    now = datetime.now(timezone.utc).isoformat()
+    pwd_hashed = hash_password(password)
+    user_id = f"usr_{secrets.token_hex(8)}"
+    avatar = f"https://api.dicebear.com/7.x/initials/svg?seed={cleaned_name}"
+
+    async with aiosqlite.connect(str(path)) as db:
+        db.row_factory = aiosqlite.Row
+        # Check if email is already taken
+        cursor = await db.execute("SELECT id FROM users WHERE email = ?", (cleaned_email,))
+        if await cursor.fetchone() is not None:
+            raise ValueError("An account with this email address already exists.")
+
+        await db.execute(
+            """
+            INSERT INTO users (id, email, name, picture, password_hash, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, cleaned_email, cleaned_name, avatar, pwd_hashed, now),
+        )
+        await db.commit()
+
+        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+        assert row is not None
+        user_dict = dict(row)
+        user_dict.pop("password_hash", None)
+        return user_dict
+
+
+async def authenticate_user_email(
+    email: str,
+    password: str,
+    db_path: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
+    """Validate user credentials for email/password sign in."""
+    path = db_path or DB_PATH
+    cleaned_email = email.lower().strip()
+
+    async with aiosqlite.connect(str(path)) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM users WHERE email = ?", (cleaned_email,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+
+        stored_hash = row["password_hash"]
+        if not stored_hash or not verify_password(password, stored_hash):
+            return None
+
+        user_dict = dict(row)
+        user_dict.pop("password_hash", None)
+        return user_dict
 
 
 async def get_user_by_id(user_id: str, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
@@ -116,7 +201,9 @@ async def get_user_by_id(user_id: str, db_path: Optional[Path] = None) -> Option
         row = await cursor.fetchone()
         if row is None:
             return None
-        return dict(row)
+        user_dict = dict(row)
+        user_dict.pop("password_hash", None)
+        return user_dict
 
 
 async def create_session(
@@ -124,16 +211,7 @@ async def create_session(
     user_id: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> int:
-    """Create a new workout session record linked to a user.
-
-    Args:
-        exercise_type: Name/type of the exercise being recorded.
-        user_id: Optional authenticated user ID.
-        db_path: Optional custom path to SQLite database.
-
-    Returns:
-        int: The auto-generated session ID.
-    """
+    """Create a new workout session record linked to a user."""
     path = db_path or DB_PATH
     started_at = datetime.now(timezone.utc).isoformat()
 
@@ -146,75 +224,49 @@ async def create_session(
             (user_id, started_at, exercise_type),
         )
         await db.commit()
-        session_id = cursor.lastrowid
-        assert session_id is not None
-        return session_id
+        return cursor.lastrowid or 0
 
 
 async def update_session(
     session_id: int,
     total_reps: int,
     avg_form_score: float,
-    feedback_log: List[Any],
+    feedback_log: List[str],
     db_path: Optional[Path] = None,
 ) -> None:
-    """Update an existing session with final rep counts, average score, and feedback logs."""
+    """Update an existing session with live exercise metrics."""
+    path = db_path or DB_PATH
+    async with aiosqlite.connect(str(path)) as db:
+        await db.execute(
+            """
+            UPDATE sessions
+            SET total_reps = ?, avg_form_score = ?, feedback_log = ?
+            WHERE id = ?
+            """,
+            (total_reps, avg_form_score, json.dumps(feedback_log), session_id),
+        )
+        await db.commit()
+
+
+async def end_session(session_id: int, db_path: Optional[Path] = None) -> None:
+    """Finalize a session by recording the ended_at timestamp."""
     path = db_path or DB_PATH
     ended_at = datetime.now(timezone.utc).isoformat()
-    feedback_json = json.dumps(feedback_log)
 
     async with aiosqlite.connect(str(path)) as db:
         await db.execute(
             """
             UPDATE sessions
-            SET ended_at = ?,
-                total_reps = ?,
-                avg_form_score = ?,
-                feedback_log = ?
+            SET ended_at = ?
             WHERE id = ?
             """,
-            (ended_at, total_reps, avg_form_score, feedback_json, session_id),
+            (ended_at, session_id),
         )
         await db.commit()
 
 
-def _format_session_row(row: aiosqlite.Row) -> Dict[str, Any]:
-    """Helper to convert a sqlite Row to a dict, deserializing feedback_log JSON."""
-    item = dict(row)
-    if isinstance(item.get("feedback_log"), str):
-        try:
-            item["feedback_log"] = json.loads(item["feedback_log"])
-        except Exception:
-            item["feedback_log"] = []
-    return item
-
-
-async def get_sessions(
-    user_id: Optional[str] = None,
-    db_path: Optional[Path] = None,
-) -> List[Dict[str, Any]]:
-    """Retrieve recorded exercise sessions ordered by started_at descending.
-
-    If user_id is provided, returns sessions for that user or unassigned legacy sessions.
-    """
-    path = db_path or DB_PATH
-    async with aiosqlite.connect(str(path)) as db:
-        db.row_factory = aiosqlite.Row
-        if user_id:
-            cursor = await db.execute(
-                "SELECT * FROM sessions WHERE user_id = ? OR user_id IS NULL ORDER BY started_at DESC LIMIT 50",
-                (user_id,),
-            )
-        else:
-            cursor = await db.execute(
-                "SELECT * FROM sessions ORDER BY started_at DESC LIMIT 50"
-            )
-        rows = await cursor.fetchall()
-        return [_format_session_row(row) for row in rows]
-
-
 async def get_session(session_id: int, db_path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """Retrieve a single session by its unique ID."""
+    """Retrieve a single session by its primary key ID."""
     path = db_path or DB_PATH
     async with aiosqlite.connect(str(path)) as db:
         db.row_factory = aiosqlite.Row
@@ -225,4 +277,110 @@ async def get_session(session_id: int, db_path: Optional[Path] = None) -> Option
         row = await cursor.fetchone()
         if row is None:
             return None
-        return _format_session_row(row)
+
+        data = dict(row)
+        try:
+            data["feedback_log"] = json.loads(data["feedback_log"])
+        except Exception:
+            data["feedback_log"] = []
+        return data
+
+
+async def get_sessions(
+    limit: int = 50,
+    user_id: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> List[Dict[str, Any]]:
+    """Retrieve recent workout sessions, optionally filtered by user ID."""
+    path = db_path or DB_PATH
+    async with aiosqlite.connect(str(path)) as db:
+        db.row_factory = aiosqlite.Row
+        if user_id:
+            cursor = await db.execute(
+                """
+                SELECT * FROM sessions
+                WHERE user_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, limit),
+            )
+        else:
+            cursor = await db.execute(
+                """
+                SELECT * FROM sessions
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+        rows = await cursor.fetchall()
+        result = []
+        for row in rows:
+            data = dict(row)
+            try:
+                data["feedback_log"] = json.loads(data["feedback_log"])
+            except Exception:
+                data["feedback_log"] = []
+            result.append(data)
+        return result
+
+
+async def get_analytics_summary(
+    user_id: Optional[str] = None,
+    db_path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Calculate aggregate recovery and exercise metrics for analytics."""
+    path = db_path or DB_PATH
+    async with aiosqlite.connect(str(path)) as db:
+        db.row_factory = aiosqlite.Row
+        where_clause = "WHERE user_id = ?" if user_id else ""
+        params = (user_id,) if user_id else ()
+
+        # Total sessions & reps
+        cursor = await db.execute(
+            f"""
+            SELECT 
+                COUNT(*) as total_sessions,
+                COALESCE(SUM(total_reps), 0) as total_reps,
+                COALESCE(AVG(avg_form_score), 0.0) as overall_form_score
+            FROM sessions {where_clause}
+            """,
+            params,
+        )
+        stats = dict(await cursor.fetchone() or {})
+
+        # Breakdown by exercise type
+        cursor = await db.execute(
+            f"""
+            SELECT 
+                exercise_type,
+                COUNT(*) as sessions_count,
+                SUM(total_reps) as total_reps,
+                AVG(avg_form_score) as avg_form_score
+            FROM sessions {where_clause}
+            GROUP BY exercise_type
+            """,
+            params,
+        )
+        exercise_breakdown = [dict(row) for row in await cursor.fetchall()]
+
+        # Recent 7 sessions trend
+        cursor = await db.execute(
+            f"""
+            SELECT id, started_at, exercise_type, total_reps, avg_form_score
+            FROM sessions {where_clause}
+            ORDER BY id ASC
+            LIMIT 14
+            """,
+            params,
+        )
+        recent_trend = [dict(row) for row in await cursor.fetchall()]
+
+        return {
+            "total_sessions": stats.get("total_sessions", 0),
+            "total_reps": stats.get("total_reps", 0),
+            "overall_form_score": round(stats.get("overall_form_score", 0.0), 2),
+            "exercise_breakdown": exercise_breakdown,
+            "recent_trend": recent_trend,
+        }

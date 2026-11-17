@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useCamera } from '../hooks/useCamera';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { VideoFeed } from '../components/VideoFeed';
-import { HUD } from '../components/HUD';
+import { HUD, type AICoachFeedback } from '../components/HUD';
+import { soundEngine } from '../utils/audioAlerts';
 
 export const LiveSession: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -23,10 +24,24 @@ export const LiveSession: React.FC = () => {
   const [annotatedFrame, setAnnotatedFrame] = useState<string | null>(null);
   const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<number | null>(null);
+  const [aiCoach, setAiCoach] = useState<AICoachFeedback | undefined>(undefined);
+  const [buzzerEnabled, setBuzzerEnabled] = useState<boolean>(soundEngine.buzzerEnabled);
+
+  // Track previous rep count to play success chime
+  const prevRepCountRef = useRef<number>(0);
 
   // Custom hooks
   const { videoRef, canvasRef, isActive, cameraError, startCamera, stopCamera, captureFrame } = useCamera();
   const { connect, disconnect, send, lastMessage, isConnected } = useWebSocket();
+
+  const handleToggleBuzzer = () => {
+    const nextState = !buzzerEnabled;
+    setBuzzerEnabled(nextState);
+    soundEngine.setBuzzerEnabled(nextState);
+    if (nextState) {
+      soundEngine.playBuzzer('warning');
+    }
+  };
 
   // On mount: start camera, connect websocket, activate session
   useEffect(() => {
@@ -100,6 +115,10 @@ export const LiveSession: React.FC = () => {
     if (!data) return;
 
     if (typeof data.rep_count === 'number') {
+      if (data.rep_count > prevRepCountRef.current) {
+        soundEngine.playSuccessChime();
+        prevRepCountRef.current = data.rep_count;
+      }
       setRepCount(data.rep_count);
     }
     if (data.state) {
@@ -122,16 +141,24 @@ export const LiveSession: React.FC = () => {
     }
     if (data.form_status === 'good' || data.form_status === 'warning' || data.form_status === 'error') {
       setFormStatus(data.form_status);
-    } else if (typeof data.form_score === 'number') {
-      const score = data.form_score;
-      if (score >= 0.8) {
-        setFormStatus('good');
-      } else if (score >= 0.5) {
-        setFormStatus('warning');
-      } else {
-        setFormStatus('error');
+    }
+
+    // AI Coach multi-sensory feedback (Buzzer + Spoken Cue)
+    if (data.ai_coach) {
+      setAiCoach(data.ai_coach);
+      const coach = data.ai_coach;
+
+      if (coach.buzzer_type === 'danger') {
+        soundEngine.playBuzzer('danger');
+      } else if (coach.buzzer_type === 'warning') {
+        soundEngine.playBuzzer('warning');
+      }
+
+      if (coach.voice_cue) {
+        soundEngine.speak(coach.voice_cue, coach.should_stop);
       }
     }
+
     if (data.frame) {
       setAnnotatedFrame(data.frame);
     }
@@ -185,8 +212,9 @@ export const LiveSession: React.FC = () => {
           isConnected={isConnected}
           isActive={isActive}
           cameraError={cameraError}
-          onRetryCamera={startCamera}
         />
+
+        {/* Realtime Telemetry HUD Overlay */}
         <HUD
           repCount={repCount}
           exercise={exercise}
@@ -197,23 +225,49 @@ export const LiveSession: React.FC = () => {
           romPct={romPct}
           formScore={formScore}
           checkpoints={checkpoints}
+          aiCoach={aiCoach}
+          buzzerEnabled={buzzerEnabled}
+          onToggleBuzzer={handleToggleBuzzer}
         />
       </div>
 
-      {/* Control Actions */}
-      <div className="mt-6 flex justify-center">
-        <button
-          onClick={handleStopWorkout}
-          className="flex items-center gap-2 bg-rose-600 hover:bg-rose-500 text-white font-semibold px-8 py-3.5 rounded-lg shadow-xl shadow-rose-600/30 transition-all cursor-pointer hover:scale-105 active:scale-95"
-        >
-          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z"
-              clipRule="evenodd"
+      {/* Interactive Controls Bar */}
+      <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl p-4 max-w-4xl mx-auto shadow-xl">
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs text-slate-300">
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                isConnected ? 'bg-emerald-500' : 'bg-amber-500 animate-ping'
+              }`}
             />
+            <span className="font-medium">
+              {isConnected ? 'Vision WebSocket Connected' : 'Connecting Engine...'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleToggleBuzzer}
+            className={`px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              buzzerEnabled
+                ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-400'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+          >
+            <span>{buzzerEnabled ? '🔊 Form Buzzer: ACTIVE' : '🔇 Form Buzzer: MUTED'}</span>
+          </button>
+        </div>
+
+        {/* Finish Workout CTA */}
+        <button
+          type="button"
+          onClick={handleStopWorkout}
+          className="flex items-center gap-2 bg-rose-500/15 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/40 px-5 py-2.5 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
-          <span>Stop Workout</span>
+          <span>End Workout & View Analysis</span>
         </button>
       </div>
     </div>

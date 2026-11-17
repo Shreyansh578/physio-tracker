@@ -6,7 +6,7 @@ from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from app.auth import (
     create_access_token,
@@ -15,7 +15,17 @@ from app.auth import (
     get_current_user_required,
     parse_google_credential,
 )
-from app.database import get_session, get_sessions, get_user_by_id, init_db, upsert_user
+from app.database import (
+    authenticate_user_email,
+    get_analytics_summary,
+    get_session,
+    get_sessions,
+    get_user_by_id,
+    init_db,
+    register_user_email,
+    upsert_user,
+)
+from app.llm_coach import generate_physio_response
 from app.pose_detector import PoseDetector
 from app.ws_handler import VideoWebSocketHandler
 
@@ -48,8 +58,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="PhysioTracker API",
-    description="Real-time physiotherapy exercise recognition, form feedback, and Google OAuth / JWT authentication backend.",
-    version="1.1.0",
+    description="Real-time physiotherapy exercise recognition, form feedback, AI physical therapy coaching, and authentication backend.",
+    version="1.2.0",
     lifespan=lifespan,
 )
 
@@ -77,18 +87,94 @@ class GoogleAuthRequest(BaseModel):
     demo_name: Optional[str] = None
 
 
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+
+
 @app.get("/", summary="Health Check")
 async def health_check() -> Dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok"}
 
 
+@app.post("/api/auth/register", summary="Manual Email/Password Registration")
+async def register_account(req: RegisterRequest) -> Dict[str, Any]:
+    """Register a new patient or user account with email and password."""
+    if len(req.password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters long.",
+        )
+    if not req.email or "@" not in req.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please provide a valid email address.",
+        )
+
+    try:
+        user = await register_user_email(
+            email=req.email,
+            password=req.password,
+            name=req.name,
+        )
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(val_err),
+        )
+
+    token = create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "picture": user.get("picture", ""),
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
+@app.post("/api/auth/login", summary="Manual Email/Password Login")
+async def login_account(req: LoginRequest) -> Dict[str, Any]:
+    """Authenticate an existing account using email and password."""
+    user = await authenticate_user_email(email=req.email, password=req.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password. Please verify your credentials.",
+        )
+
+    token = create_access_token({
+        "sub": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "picture": user.get("picture", ""),
+    })
+
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user,
+    }
+
+
 @app.post("/api/auth/google", summary="Google OAuth 2.0 / JWT Login")
 async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
-    """Exchange a Google OAuth credential token or trigger quick demo Google login.
-
-    Issues a signed JWT access token and returns user profile.
-    """
+    """Exchange a Google OAuth credential token or trigger quick demo Google login."""
     if req.credential:
         profile = parse_google_credential(req.credential)
     elif req.demo or req.demo_email:
@@ -138,6 +224,29 @@ async def current_user_profile(
     if not user:
         return user_claims
     return user
+
+
+@app.post("/api/ai/chat", summary="Interactive AI Physical Therapy Consultation")
+async def ai_consultation_chat(
+    req: ChatRequest,
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+) -> Dict[str, Any]:
+    """Chat with the AI Doctor of Physical Therapy and Biomechanics Specialist."""
+    user_name = user.get("name", "Patient") if user else "Patient"
+    response_text = generate_physio_response(req.message, user_name=user_name)
+    return {
+        "reply": response_text,
+        "specialist": "Dr. Alex, DPT (AI Biomechanics & Rehab Coach)",
+    }
+
+
+@app.get("/api/analytics", summary="User Recovery & Workout Analytics")
+async def get_analytics(
+    user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
+) -> Dict[str, Any]:
+    """Retrieve aggregate workout analytics, ROM trends, and repetition consistency."""
+    user_id = user.get("sub") if user else None
+    return await get_analytics_summary(user_id=user_id)
 
 
 @app.get("/api/sessions", summary="List Sessions")
