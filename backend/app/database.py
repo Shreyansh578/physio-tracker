@@ -99,27 +99,49 @@ async def upsert_user(
     picture: Optional[str] = None,
     db_path: Optional[Path] = None,
 ) -> Dict[str, Any]:
-    """Insert or update a user profile from Google OAuth."""
+    """Insert or update a user profile from Google OAuth.
+    Safely resolves existing user records by email or ID without UNIQUE constraint collisions.
+    """
     path = db_path or DB_PATH
     now = datetime.now(timezone.utc).isoformat()
+    clean_email = email.lower().strip()
+    clean_name = name.strip() or clean_email.split("@")[0]
 
     async with aiosqlite.connect(str(path)) as db:
         db.row_factory = aiosqlite.Row
-        await db.execute(
-            """
-            INSERT INTO users (id, email, name, picture, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                email = excluded.email,
-                name = excluded.name,
-                picture = excluded.picture
-            """,
-            (user_id, email.lower().strip(), name.strip(), picture or "", now),
-        )
-        await db.commit()
 
-        cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-        row = await cursor.fetchone()
+        # Check if user with this email or ID already exists
+        cursor = await db.execute(
+            "SELECT * FROM users WHERE email = ? OR id = ?",
+            (clean_email, user_id),
+        )
+        existing = await cursor.fetchone()
+
+        if existing:
+            target_id = existing["id"]
+            await db.execute(
+                """
+                UPDATE users
+                SET name = ?, picture = CASE WHEN ? != '' THEN ? ELSE picture END
+                WHERE id = ?
+                """,
+                (clean_name, picture or "", picture or "", target_id),
+            )
+            await db.commit()
+            cursor = await db.execute("SELECT * FROM users WHERE id = ?", (target_id,))
+            row = await cursor.fetchone()
+        else:
+            await db.execute(
+                """
+                INSERT INTO users (id, email, name, picture, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, clean_email, clean_name, picture or "", now),
+            )
+            await db.commit()
+            cursor = await db.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            row = await cursor.fetchone()
+
         assert row is not None
         user_dict = dict(row)
         user_dict.pop("password_hash", None)

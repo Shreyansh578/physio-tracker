@@ -1,6 +1,7 @@
 """FastAPI backend application entrypoint for physiotherapy tracker."""
 
 from contextlib import asynccontextmanager
+import hashlib
 import logging
 from typing import Any, AsyncGenerator, Dict, List, Optional
 
@@ -179,9 +180,9 @@ async def auth_google(req: GoogleAuthRequest) -> Dict[str, Any]:
         profile = parse_google_credential(req.credential)
     elif req.demo or req.demo_email:
         # Pre-configured demo login for instant teacher/examiner presentation testing
-        email = req.demo_email or "student.physio@gmail.com"
+        email = (req.demo_email or "student.physio@gmail.com").lower().strip()
         name = req.demo_name or "Alex Mercer (Physio Patient)"
-        sub = str(abs(hash(email)))[:12]
+        sub = hashlib.sha256(email.encode("utf-8")).hexdigest()[:12]
         profile = {
             "id": f"google_{sub}",
             "email": email,
