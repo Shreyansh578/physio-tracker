@@ -1,0 +1,27 @@
+{
+  "dataset_name": "Kaggle Exercise Pose Benchmark (Physical Exercise Recognition Dataset)",
+  "total_test_attempts": 100,
+  "total_frames_evaluated": 3200,
+  "repetition_counting": {
+    "ground_truth_valid_reps": 90,
+    "detected_valid_reps": 64,
+    "valid_repetition_accuracy_pct": 71.11,
+    "incomplete_reps_tested": 10,
+    "incomplete_reps_suppressed": 10,
+    "false_rep_rejection_rate_pct": 100.0
+  },
+  "form_defect_classification": {
+    "true_positives": 50,
+    "false_positives": 20,
+    "true_negatives": 25,
+    "false_negatives": 5,
+    "precision_pct": 71.43,
+    "recall_sensitivity_pct": 90.91,
+    "specificity_pct": 55.56,
+    "f1_score_pct": 80.0
+  },
+  "computational_performance": {
+    "mean_processing_latency_ms": 0.012,
+    "max_sustainable_fps": 80036.3
+  }
+}

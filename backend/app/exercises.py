@@ -40,7 +40,7 @@ class Exercise(ABC):
         pass
 
     @abstractmethod
-    def process(self, landmarks: Any) -> Dict[str, Any]:
+    def process(self, landmarks: Any, timestamp: Optional[float] = None) -> Dict[str, Any]:
         """Process landmarks for a single video frame.
 
         Args:
@@ -258,8 +258,8 @@ class BicepCurl(Exercise):
 
         return rep_completed, elbow_angle, flare_angle, torso_tilt, errors, error_joints
 
-    def process(self, landmarks: Any) -> Dict[str, Any]:
-        now = time.time()
+    def process(self, landmarks: Any, timestamp: Optional[float] = None) -> Dict[str, Any]:
+        now = timestamp if timestamp is not None else time.time()
 
         if landmarks is None or len(landmarks) < 25:
             return {
@@ -435,8 +435,8 @@ class Squat(Exercise):
         self._running_form_scores.clear()
         self._last_evaluated_score = 1.0
 
-    def process(self, landmarks: Any) -> Dict[str, Any]:
-        now = time.time()
+    def process(self, landmarks: Any, timestamp: Optional[float] = None) -> Dict[str, Any]:
+        now = timestamp if timestamp is not None else time.time()
 
         if landmarks is None or len(landmarks) < 29:
             return {

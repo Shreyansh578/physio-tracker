@@ -241,6 +241,18 @@ async def ai_consultation_chat(
     }
 
 
+@app.get("/api/benchmark", summary="Kaggle Dataset Benchmark Validation")
+async def get_benchmark_results() -> Dict[str, Any]:
+    """Return empirical validation metrics against the Kaggle Exercise Pose Benchmark dataset."""
+    from pathlib import Path
+    import json
+    benchmark_file = Path(__file__).resolve().parent.parent / "data" / "datasets" / "benchmark_summary.json"
+    if benchmark_file.exists():
+        with open(benchmark_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"status": "Benchmark summary not generated yet"}
+
+
 @app.get("/api/analytics", summary="User Recovery & Workout Analytics")
 async def get_analytics(
     user: Optional[Dict[str, Any]] = Depends(get_current_user_optional),
